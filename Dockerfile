@@ -11,15 +11,19 @@ VOLUME /var/attachments
 # Disable Prompt During Packages Installation
 ARG DEBIAN_FRONTEND=noninteractive
 
+
 # Update Ubuntu Software repository
-RUN apt-get update && \
-    apt-get install -y unzip jq  && \
-    echo "**** cleanup ****" && \
+RUN apt-get update && apt-get install -y  bash curl unzip jq && curl -1sLf \
+'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
+&& apt-get update && apt-get install -y infisical  \
+&& echo "**** cleanup ****" && \
     apt-get clean && \
     rm -rf \
         /tmp/* \
         /var/lib/apt/lists/* \
         /var/tmp/*
+
+
 
 WORKDIR /app
 
@@ -52,6 +56,4 @@ RUN unzip /tmp/bw.zip && \
         /app \
         /var/attachment \
         /var/data
-
-ENTRYPOINT ["/entrypoint.sh"]
-
+ENTRYPOINT [ "/entrypoint.sh" ]

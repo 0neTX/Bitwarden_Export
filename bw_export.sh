@@ -17,7 +17,6 @@
 
 
 # Constant and global variables
-
 params_validated=0
 Yellow='\033[0;33m'       # Yellow
 IYellow='\033[0;93m'      # Yellow
