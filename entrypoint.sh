@@ -18,5 +18,9 @@ if [[ -n "${INFISICAL_TOKEN}" ]]; then
     echo -e "\n${Yellow}Infisical enabled! "
     command="infisical run $infisicalpath --command='$command'"
 fi
-
 eval $command
+if [[ -n "${NOTIFICATION_URL}" ]]; then
+    echo -e "\n${Cyan}Notification enabled: $NOTIFICATION_URL "
+    /app/shoutrrr send -m "$(cat $FILE_LOG)"  -u "$NOTIFICATION_URL"
+fi
+
