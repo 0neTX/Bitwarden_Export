@@ -19,7 +19,8 @@ if [[ -n "${INFISICAL_TOKEN}" ]]; then
         infisicalpath="--path=${INFISICAL_PATH}"
     fi
     echo -e "\n${Yellow}Infisical enabled! "
-    infisical run "$infisicalpath" --command="echo Mi clinete es:$BW_CLIENTID"
+    #Run this command to test connection with Infiscal
+    infisical run "$infisicalpath" --command="echo BW_CLIENTID:$BW_CLIENTID"
     returncode=$?
     if [[ -n "${NOTIFICATION_URL}" ]]  &&  [[ "$returncode" -ne "0" ]]; then
         send_notification
