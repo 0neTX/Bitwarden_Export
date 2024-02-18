@@ -3,24 +3,43 @@
 
 Yellow='\033[0;33m'       # Yellow
 Cyan='\033[0;36m'         # Cyan
+
+send_notification () {
+    set -xe
+    echo -e "\n${Cyan}Notification enabled: $NOTIFICATION_URL "
+    /app/shoutrrr send -m "$(tail -n 15 "$logfile")"  -u "$NOTIFICATION_URL"
+}
+
+#Base Command
 command="su bitwarden -c /app/bw_export.sh "
-if [[ -n "${FILE_LOG}" ]]; then
-    echo -e "\n${Cyan}Output log enabled: $FILE_LOG "
-    command="$command 2>&1 | tee $FILE_LOG"
-fi
+logfile=/app/bw-export-logfile.log
 
 if [[ -n "${INFISICAL_TOKEN}" ]]; then
-
     if [[ -n "${INFISICAL_PATH}" ]]; then
         infisicalpath="--path=${INFISICAL_PATH}"
     fi
-
     echo -e "\n${Yellow}Infisical enabled! "
+    infisical run "$infisicalpath" --command="echo Mi clinete es:$BW_CLIENTID"
+    returncode=$?
+    if [[ -n "${NOTIFICATION_URL}" ]]  &&  [[ "$returncode" -ne "0" ]]; then
+        send_notification
+        exit 1
+    fi
     command="infisical run $infisicalpath --command='$command'"
 fi
-eval $command
-if [[ -n "${NOTIFICATION_URL}" ]]; then
-    echo -e "\n${Cyan}Notification enabled: $NOTIFICATION_URL "
-    /app/shoutrrr send -m "$(cat $FILE_LOG)"  -u "$NOTIFICATION_URL"
+
+if [[ -n "${FILE_LOG}" ]]; then
+    echo -e "\n${Cyan}Output log enabled: $FILE_LOG "
+    logfile=$FILE_LOG
+fi
+
+command="$command 2>&1 | tee $logfile"
+set -o pipefail
+eval "$command"
+return=$?
+echo Return Code: $return
+
+if [[ -n "${NOTIFICATION_URL}" ]]  &&  [[ "$return" -ne "0" ]]; then
+    send_notification
 fi
 

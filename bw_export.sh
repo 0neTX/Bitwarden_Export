@@ -18,9 +18,7 @@
 # could not be exported.
 
 # Constant and global variables
-
 BITWARDENCLI_APPDATA_DIR="${BITWARDENCLI_APPDATA_DIR:-"$(pwd)"}"
-
 params_validated=0
 Yellow='\033[0;33m'  # Yellow
 IYellow='\033[0;93m' # Yellow
@@ -62,7 +60,7 @@ fi
 #   bw login #(follow the prompts);
 if [[ -z "${BW_URL_SERVER}" ]]; then
     echo -e -n "$Cyan" # set text = yellow
-    echo -e "\nInfo: BW_SERVER enviroment not provided."
+    echo -e "\nInfo: BW_URL_SERVER enviroment not provided."
 
     echo -n "$(date '+%F %T') If you have your own Bitwarden or Vaulwarden server, set in the environment variable BW_URL_SERVER its url address. "
     echo -n "$(date '+%F %T') Example: https://skynet-vw.server.com"
@@ -123,10 +121,6 @@ fi
 #Set Organization ID (if applicable)
 if [[ -z "${BW_ORGANIZATIONS_LIST}" ]]; then
     echo -e "\n$(date '+%F %T') ${Cyan} BW_ORGANIZATIONS_LIST enviroment not provided. All detected organizations will be exported. "
-    echo -e "${Cyan} If you want to make a backup of specific organizations, set one or more organizations separated by comma"
-    echo -e "${Cyan} To obtain your organization_id value, open a terminal and type:"
-    echo -e "${Cyan}       bw login #(follow the prompts); bw list organizations | jq -r '.[0] | .id'"
-    echo -e "${Cyan}       Example: cada13d7-5418-37ed-981b-be822121c593,cada13d7-5418-37ed-981b-be82219879878979,cada13d7-5418-37ed-981b-be822121c5435"
 else
     organization_list="${BW_ORGANIZATIONS_LIST}"
 fi
@@ -163,37 +157,36 @@ echo
 
 if [[ $bw_url_server != "" && $bw_url_server != *"bitwarden.com" ]]; then
     echo "$(date '+%F %T') Setting custom server..."
-    bw config server "$bw_url_server" --quiet --nointeraction
+    bw config server "$bw_url_server" --nointeraction
     echo
 fi
 
 BW_CLIENTID=$client_id
 BW_CLIENTSECRET=$client_secret
-
 #Login user if not already authenticated
 if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
     echo "$(date '+%F %T') Performing login..."
     bw login --apikey --method 0 --quiet --nointeraction
 fi
 if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to authenticate."
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to login."
     echo
     exit 1
 fi
 
 #Unlock the vault
+echo "$(date '+%F %T') Unlocking the vault..." 
 session_key=$(bw unlock "$bw_password" --raw)
-
 #Verify that unlock succeeded
-if [[ $session_key == "" ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to authenticate."
+
+if [[ $session_key == "" ]] ||  [[ " $session_key"  == "0" ]]; then
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to unlock vault with BW_PASSWORD."
     exit 1
 else
-    echo "$(date '+%F %T') Login successful."
+    echo "$(date '+%F %T') Vault unlocked."
 fi
 #Export the session key as an env variable (needed by BW CLI)
 export BW_SESSION="$session_key"
-echo
 
 #Check if the user has decided to enter a password or save unencrypted
 if [[ $password1 == "" ]]; then
@@ -309,7 +302,7 @@ if [ -n "${KEEP_LAST_BACKUPS}" ]; then
     echo -e "$(date '+%F %T') ${Cyan}Info: Max Nº backups: $keep_backups"
     if [[ $actual_num_backups -gt $keep_backups ]]; then
         for F in $(find "$save_folder" -path "*-bw-export" -type d | sort | head -"$(("$actual_num_backups" - "$keep_backups"))"); do
-            echo -e "\n$(date '+%F %T') ${Blue} Deleting exported vault:$F"
+            echo -e "$(date '+%F %T') ${Blue} Deleting exported vault:$F"
             rm -rf "$F"
         done
     fi
@@ -319,7 +312,7 @@ if [ -n "${KEEP_LAST_BACKUPS}" ]; then
         echo -e "\n$(date '+%F %T') ${Cyan}Info: Nº backups: $actual_num_backups"
         echo -e "$(date '+%F %T') ${Cyan}Info: Max Nº backups: $keep_backups"
         for F in $(find "$save_folder_attachments" -path "*-bw-export" -type d | sort | head -$(("$actual_num_backups" - "$keep_backups"))); do
-            echo -e "\n$(date '+%F %T') ${Blue} Deleting exported attachment:$F"
+            echo -e "$(date '+%F %T') ${Blue} Deleting exported attachment:$F"
             rm -rf "$F"
         done
     fi
