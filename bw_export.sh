@@ -194,7 +194,7 @@ then
 fi
 
 #Unlock the vault
-session_key=$(bw unlock $bw_password --raw)
+session_key=$(bw unlock "$bw_password" --raw)
 
 #Verify that unlock succeeded
 if [[ $session_key == "" ]]
