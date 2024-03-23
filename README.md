@@ -142,6 +142,7 @@ echo BW_PASSWORD  > ./.secrets/.bwpassword
 
 - Edit Docker compose and add the variables `INFISICAL_TOKEN` with previous generated token and `INFISICAL_PATH` with *Secrets Path* value
 
+![compose sample](docs/assets/infisical4.png)
 
 
 ## Run in Unraid

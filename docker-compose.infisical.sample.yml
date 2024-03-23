@@ -1,0 +1,15 @@
+services:
+  bw-export:
+    container_name: bw-export
+    tty: true
+    image: 0netx/bw-export:latest
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - FILE_LOG=/var/data/bw-export-logfile.log
+      - KEEP_LAST_BACKUPS=3
+      - INFISICAL_TOKEN=st.aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      # Optional: Insfisical tokens subfolder collection
+      #- INFISICAL_PATH=/
+      
