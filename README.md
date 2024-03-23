@@ -4,7 +4,6 @@
 
 **[Bitwarden_Export](https://github.com/0neTX/Bitwarden_Export)**: Docker to backup your Bitwarden vault contents
 
-
 [![CD to Docker Hub to Release-Latest](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml/badge.svg?branch=main&event=status)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml)
 
 
@@ -36,7 +35,7 @@ Before using the image for the first time, you must edit the variables and volum
 The docker image will prompt you for your password each time so that you don't have to save that within the docker image.
 
 ### Execution:
-From a terminal window, simply type: `bash bw_export.sh` and follow the prompts. 
+From a terminal window, simply type: `bash bw_export.sh` and follow the prompts.
 
 ## Outputs
 
@@ -81,13 +80,35 @@ The following are created by the docker image:
 * Configure each required variable and volumes.
 * Run the compose with `docker compose up`
 
+### Enviroment Variables
+
+Vaultwarden Export can be configured using the following environment variables. 
+
+You must report the following variables so that the container can authenticate itself in your vault. The API Keys for authentication can be obtained from Personal API Keys for CLI Authentication <a href="https://bitwarden.com/help/personal-api-key/" target="_blank">https://bitwarden.com/help/personal-api-key/</a>
+
+| Variable                          | Description                                                                              |
+|-----------------------------------|------------------------------------------------------------------------------------------|
+| `BW_CLIENTID`                     | It's `client_id` variable from your account      |
+| `BW_CLIENTSECRET`                 | It's `client_secret` variable from your account                      |
+| `BW_PASSWORD`                     | Your Bitwarden/Vaultwarden password.                                                   |
+| `EXPORT_PASSWORD`                 | Encryption password you have chosen for exporting then vault. if you choose to use password-encryption to store your export files (recommended) be sure that you use a strong and memorable password! (don't just store it inside Bitwarden, because if you get locked out of your account you won't be able to restore your exports) |
+
+**OPTIONALS VARIABLES:**
+
+| Variable                          | Description                                                                              |
+|-----------------------------------|------------------------------------------------------------------------------------------|
+| `BW_ORGANIZATIONS_LIST`           | If you want to make a backup of your organizations, set one or more organizations separated by comma. |
+| `NOTIFICATION_URL`                | Shoutrrr notification url [Service overview](https://containrrr.dev/shoutrrr/v0.8/services/overview/) |
+| `KEEP_LAST_BACKUPS`               | Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted. |
+| `FILE_LOG`                        | Optional: Execution logging file. Please check output path is mapping inside a volume    |
+
 ### Safety
 
 This container is based on an automation of the official [Bitwarden CLI client](https://bitwarden.com/help/cli/). **This script does not save, trace or store any information.** The session is closed after the backup has been performed.
 
 If you wish you can configure each variable using [docker secrets](https://docs.docker.com/compose/use-secrets/) as in the example [docker-compose.secrets.sample.yml](https://github.com/0neTX/Bitwarden_Export/blob/main/docker-compose.secrets.sample.yml)
 
-- Define docker secret files
+### Safety. Option A) Define docker secret files
 
 ``` bash
 mkdir ./.secrets
@@ -98,6 +119,30 @@ echo BW_PASSWORD  > ./.secrets/.bwpassword
 
 - Configure `docker-compose.secrets.sample.yml` with your variables and volumes
 - Run it and enjoy it.
+
+### Safety. Option B) Use infisical
+
+- Sign up in [Infisical free account](https://app.infisical.com/signup)
+- Create a project and create the variables bellow:
+
+  - `BW_CLIENTID`=*CLIENT ID FROM BITWARDEN API*
+  - `BW_CLIENTSECRET`=*CLIENT SECRET FROM BITWARDEN API*
+  - `BW_PASSWORD`=*BITWARDEN PASSWORD*
+  - `EXPORT_PASSWORD`=*EXPORT PASSWORD. Optional*
+
+![secrets value sample](docs/assets/infisical1.png)
+
+- Create a [Service Token](https://infisical.com/docs/internals/service-tokens) in Project -- Access Control -- Service Tokens. Customize Service Token Name and Secrets Path according to your requerimients.
+
+![service token](docs/assets/infisical2.png)
+ 
+- Copy created service token
+
+![service token](docs/assets/infisical3.png)
+
+- Edit Docker compose and add the variables `INFISICAL_TOKEN` with previous generated token and `INFISICAL_PATH` with *Secrets Path* value
+
+
 
 ## Run in Unraid
 
