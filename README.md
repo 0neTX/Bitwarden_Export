@@ -6,7 +6,6 @@
 
 [![CD to Docker Hub to Release-Latest](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml/badge.svg?branch=main&event=status)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml)
 
-
 ## Features
 
 This simple bash docker image uses the Bitwarden CLI to perform three backup tasks:
@@ -14,6 +13,11 @@ This simple bash docker image uses the Bitwarden CLI to perform three backup tas
 - [x] Export personal vault
 - [x] Export organization vault (if applicable)
 - [x] Export file attachments (if applicable)
+
+### New Features
+
+- [x] Securize authentication tokes with [Infisical Vault](#safety-infisical)
+- [x] Receive notification in any platform with [Shoutrrr](https://containrrr.dev/shoutrrr/v0.8/services/overview/) config
 
 The docker image provides the choice of creating unencrypted export files or password-encrypted export files. Attachments are not encrypted.
 
@@ -108,7 +112,7 @@ This container is based on an automation of the official [Bitwarden CLI client](
 
 If you wish you can configure each variable using [docker secrets](https://docs.docker.com/compose/use-secrets/) as in the example [docker-compose.secrets.sample.yml](https://github.com/0neTX/Bitwarden_Export/blob/main/docker-compose.secrets.sample.yml)
 
-### Safety. Option A) Define docker secret files
+### Safety. Option A Define docker secret files
 
 ``` bash
 mkdir ./.secrets
@@ -120,7 +124,7 @@ echo BW_PASSWORD  > ./.secrets/.bwpassword
 - Configure `docker-compose.secrets.sample.yml` with your variables and volumes
 - Run it and enjoy it.
 
-### Safety. Option B) Use infisical
+### Safety. Option B Use infisical {#safety-infisical}
 
 - Sign up in [Infisical free account](https://app.infisical.com/signup)
 - Create a project and create the variables bellow:
