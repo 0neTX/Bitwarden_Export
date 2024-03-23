@@ -28,8 +28,8 @@ RUN apt-get update && apt-get install -y  bash curl unzip jq wget && curl -1sLf 
 WORKDIR /app
 
 # Installing shoutrrr
-RUN wget $(wget -q -O - https://api.github.com/repos/containrrr/shoutrrr/releases/latest  |  jq -r '.assets[] | select(.name | contains ("linux_amd64")) | .browser_download_url') && \
-        tar -xf shoutrrr_linux_amd64.tar.gz && \
+RUN wget $(wget -q -O - https://api.github.com/repos/containrrr/shoutrrr/releases/latest  |  jq -r '.assets[] | select(.name | contains ("linux_amd64")) | .browser_download_url')
+RUN tar -xf shoutrrr_linux_amd64.tar.gz && \
         chmod +x shoutrrr
         
 # Installing last version of Bitwarden CLI
