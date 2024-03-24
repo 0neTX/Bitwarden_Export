@@ -10,6 +10,10 @@ send_notification () {
     /app/shoutrrr send -m "$(tail -n 15 "$logfile")"  -u "$NOTIFICATION_URL"
 }
 
+if [[ -n "${NOTIFICATION_URL}" ]]; then
+    /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: STARTED"  -u "$NOTIFICATION_URL"
+fi
+
 #Base Command
 command="su bitwarden -c /app/bw_export.sh "
 logfile=/app/bw-export-logfile.log
