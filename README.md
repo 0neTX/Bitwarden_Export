@@ -16,7 +16,7 @@ This simple bash docker image uses the Bitwarden CLI to perform three backup tas
 
 ### New Features
 
-- [x] Securize authentication tokes with [Infisical Vault](#safety-infisical)
+- [x] Securize authentication tokens with [Infisical Vault](#safety-infisical)
 - [x] Receive notification in any platform with [Shoutrrr](https://containrrr.dev/shoutrrr/v0.8/services/overview/) config
 
 The docker image provides the choice of creating unencrypted export files or password-encrypted export files. Attachments are not encrypted.
