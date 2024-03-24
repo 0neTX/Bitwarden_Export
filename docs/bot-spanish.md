@@ -42,3 +42,15 @@ Selecciona el bot requerido para que puedas conectarlo a Bitwarden-Export.
 Copia el valor de tu token.
 
 ![alt text](assets/bot-7.png)
+
+## Como obtener mi Chat ID
+
+Nuestro bot tiene que saber donde debe enviarnos los mensajes. Puede enviarnos los mensajes directamente o a un canal. 
+
+Aquí veremos como obtener nuestro 'Chat Id' para que el Bot pueda enviarnos mensajes directamente.
+
+En telegram abre el bot @getmyid_bot o haz clic en este link https://t.me/getmyid_bot
+
+Ejecuta el commando `/start`  y copia tu id. de usuario **Your user ID:**
+
+![alt text](assets/bot-8.png)
