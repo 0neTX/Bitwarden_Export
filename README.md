@@ -148,6 +148,20 @@ echo BW_PASSWORD  > ./.secrets/.bwpassword
 
 ![compose sample](docs/assets/infisical4.png)
 
+### Notification in Telegram
+
+In order to receive notifications on Telegram, we must inform the following variable by replacing the values of $BOT_TOKEN and $CHAT_ID with the token of our bot and the chat id of our user:
+
+```bash
+NOTIFICATION_URL=telegram://$BOT_TOKEN@telegram/?channels=$CHAT_ID
+```
+
+Example:
+
+```bash
+NOTIFICATION_URL=telegram://1009999999:AAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@telegram/?channels=19599999999
+```
+
 
 ## Run in Unraid
 
