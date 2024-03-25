@@ -50,7 +50,15 @@ The following are created by the docker image:
 
 ## How to run the container
 
-### Run container in any plattorm with docker
+### Run container in any plattorm with docker command line:
+
+If you prefer to run it manually or just once, run the following command:
+
+```bash
+docker run --name bw-export -v ./export/data:/var/data -v ./export/attachment:/var/attachment -e "BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>" -e "BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>" -e "BW_PASSWORD=<BITWARDEN PASSWORD>" 0netx/bw-export:latest
+```
+
+### Run container in any plattorm with docker compose:
 
 * To run this container you must copy the `docker-compose.yml` from the repository.
 
