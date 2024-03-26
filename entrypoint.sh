@@ -11,7 +11,7 @@ send_notification () {
 }
 
 if [[ -n "${NOTIFICATION_URL}" ]]; then
-    /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: STARTED"  -u "$NOTIFICATION_URL"
+    /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Started"  -u "$NOTIFICATION_URL"
 fi
 
 #Base Command
@@ -44,7 +44,11 @@ eval "$command"
 return=$?
 echo Return Code: $return
 
-if [[ -n "${NOTIFICATION_URL}" ]]  &&  [[ "$return" -ne "0" ]]; then
-    send_notification
+if [[ -n "${NOTIFICATION_URL}" ]]; then
+    if [[ "$return" -ne "0" ]]; then
+        send_notification
+    else
+        /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Finish correctly ✅"  -u "$NOTIFICATION_URL"
+    fi
 fi
 

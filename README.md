@@ -170,6 +170,9 @@ Example:
 NOTIFICATION_URL=telegram://1009999999:AAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@telegram/?channels=19599999999
 ```
 
+When export finish correctly, you should receive a notification:
+
+![alt text](docs/assets/bot-notification-1.png)
 
 ## Run in Unraid
 
