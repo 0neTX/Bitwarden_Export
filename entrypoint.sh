@@ -48,7 +48,7 @@ if [[ -n "${NOTIFICATION_URL}" ]]; then
     if [[ "$return" -ne "0" ]]; then
         send_notification
     else
-        /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Finish correctly ✅"  -u "$NOTIFICATION_URL"
+        /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Finished correctly ✅"  -u "$NOTIFICATION_URL"
     fi
 fi
 
