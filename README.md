@@ -143,6 +143,7 @@ echo BW_PASSWORD  > ./.secrets/.bwpassword
   - `EXPORT_PASSWORD`=*EXPORT PASSWORD. Optional*
 
 ![secrets value sample](docs/assets/infisical1.png)
+*This is an example from Infisical Website
 
 - Create a [Service Token](https://infisical.com/docs/internals/service-tokens) in Project -- Access Control -- Service Tokens. Customize Service Token Name and Secrets Path according to your requerimients.
 
