@@ -42,3 +42,4 @@ export/
 .secrets
 docker-compose.prod.yml
 docker-compose.*.yml
+.infisical.json

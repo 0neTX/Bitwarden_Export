@@ -11,9 +11,9 @@ services:
       - BW_PASSWORD=<BITWARDEN PASSWORD>
       # Optional: Own Vaultwarden/Bitarden selfhosted server
       #- BW_URL_SERVER=<YOUR VAULTWARDER URL SERVER>
-      # Optional: By default, /var/data/
+      # Optional: Warning, Incorrect value may have malfunction effect. By default, /var/data/
       # - OUTPUT_PATH=<Output path i.e. /var/data/ >
-      # Optional: By default, /var/attachment/
+      # Optional: Warning, Incorrect value may have malfunction effect. By default, /var/attachment/
       # - ATTACHMENTS_PATH=<attachment path i.e. /var/attachment/ >
       - EXPORT_PASSWORD=<Export password. Export will be encrypted with this password>
       # Optional: If not provided, the service will export all organizations in vault.

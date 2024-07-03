@@ -11,18 +11,27 @@ VOLUME /var/attachments
 # Disable Prompt During Packages Installation
 ARG DEBIAN_FRONTEND=noninteractive
 
+
 # Update Ubuntu Software repository
-RUN apt-get update && \
-    apt-get install -y unzip jq  && \
-    echo "**** cleanup ****" && \
+RUN apt-get update && apt-get install -y  bash curl unzip jq wget && curl -1sLf \
+'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
+&& apt-get update && apt-get install -y infisical  \
+&& echo "**** cleanup ****" && \
     apt-get clean && \
     rm -rf \
         /tmp/* \
         /var/lib/apt/lists/* \
         /var/tmp/*
 
+
+
 WORKDIR /app
 
+# Installing shoutrrr
+RUN wget $(wget -q -O - https://api.github.com/repos/containrrr/shoutrrr/releases/latest  |  jq -r '.assets[] | select(.name | contains ("linux_amd64")) | .browser_download_url')
+RUN tar -xf shoutrrr_linux_amd64.tar.gz && \
+        chmod +x shoutrrr
+        
 # Installing last version of Bitwarden CLI
 ADD https://vault.bitwarden.com/download/?app=cli&platform=linux /tmp/bw.zip
 
@@ -52,6 +61,4 @@ RUN unzip /tmp/bw.zip && \
         /app \
         /var/attachment \
         /var/data
-
-ENTRYPOINT ["/entrypoint.sh"]
-
+ENTRYPOINT [ "/entrypoint.sh" ]
