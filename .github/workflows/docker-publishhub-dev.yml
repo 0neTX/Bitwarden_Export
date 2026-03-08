@@ -7,6 +7,12 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
+      - id: bitwardencli
+        uses: pozetroninc/github-action-get-latest-release@master
+        with:
+          owner: bitwarden
+          repo: clients
+          excludes: prerelease, draft      
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -24,4 +30,4 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           push: true
-          tags: 0netx/bw-export:beta
+          tags: 0netx/bw-export:beta, 0netx/bw-export:${{ steps.bitwardencli.outputs.release }}

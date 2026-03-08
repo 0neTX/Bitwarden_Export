@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 LABEL description="Bitwarden exporter docker container"
-LABEL version="1.2"
+LABEL version="1.9" 
 
 # Create a volume for storing vault exporting data
 VOLUME /var/data
@@ -32,8 +32,9 @@ RUN wget $(wget -q -O - https://api.github.com/repos/containrrr/shoutrrr/release
 RUN tar -xf shoutrrr_linux_amd64.tar.gz && \
         chmod +x shoutrrr
         
-# Installing last version of Bitwarden CLI
-ADD https://vault.bitwarden.com/download/?app=cli&platform=linux /tmp/bw.zip
+# Installing BW_CLI_VERSION version of Bitwarden CLI
+ENV BW_CLI_VERSION="2025.11.0"
+ADD https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}/bw-linux-${BW_CLI_VERSION}.zip /tmp/bw.zip
 
 # Copy script
 COPY bw_export.sh /app/bw_export.sh 
