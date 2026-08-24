@@ -18,7 +18,9 @@
 # could not be exported.
 
 # Constant and global variables
-BITWARDENCLI_APPDATA_DIR="${BITWARDENCLI_APPDATA_DIR:-"$(pwd)"}"
+# Where the CLI keeps data.json (account, tokens, cached profile). Must be
+# exported or the CLI never sees it and silently falls back to its own default.
+export BITWARDENCLI_APPDATA_DIR="${BITWARDENCLI_APPDATA_DIR:-"$(pwd)"}"
 params_validated=0
 Yellow='\033[0;33m'  # Yellow
 IYellow='\033[0;93m' # Yellow
