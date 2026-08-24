@@ -152,22 +152,63 @@ if [[ $params_validated != 0 ]]; then
     exit 1
 fi
 
+session_closed=0
+
+# Close the Bitwarden CLI session and wipe the credentials from the environment.
+# Idempotent: safe to call explicitly and from the EXIT trap.
+close_session() {
+    if [[ $session_closed -ne 0 ]]; then
+        return 0
+    fi
+    session_closed=1
+    echo "$(date '+%F %T') Closing Bitwarden CLI session..."
+    bw lock >/dev/null 2>&1 || true
+    bw logout >/dev/null 2>&1 || true
+    BW_CLIENTID=
+    BW_CLIENTSECRET=
+    BW_SESSION=
+}
+
 echo "$(date '+%F %T') $(date '+%F %T') Starting exporting..."
 echo
 
+BW_CLIENTID=$client_id
+BW_CLIENTSECRET=$client_secret
+
+# From here on the CLI holds state, so never leave a session behind: a leftover
+# session makes every later run fail at "bw config server" and at "bw unlock".
+# A bare EXIT trap is not enough, it does not run when the container is stopped.
+trap close_session EXIT
+trap 'close_session; exit 130' INT
+trap 'close_session; exit 143' TERM
+
+# Always start from a clean state. Credentials cached by a previous run go stale
+# whenever the server changes them (a server upgrade, a KDF or master password
+# change), and "bw unlock" validates the password against that cached copy, so a
+# stale cache fails forever until the account is logged out and logged in again.
+if [[ $(bw status | jq -r .status) != "unauthenticated" ]]; then
+    echo "$(date '+%F %T') Existing session detected. Logging out before starting..."
+    bw logout >/dev/null 2>&1 || true
+    if [[ $(bw status | jq -r .status) != "unauthenticated" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not log out the previous session."
+        echo "$(date '+%F %T') Remove the Bitwarden CLI data directory or recreate the container, then retry."
+        echo
+        exit 1
+    fi
+fi
+
 if [[ $bw_url_server != "" && $bw_url_server != *"bitwarden.com" ]]; then
     echo "$(date '+%F %T') Setting custom server..."
-    bw config server "$bw_url_server" --nointeraction
+    if ! bw config server "$bw_url_server" --nointeraction; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to set the server url: $bw_url_server"
+        echo
+        exit 1
+    fi
     echo
 fi
 
-BW_CLIENTID=$client_id
-BW_CLIENTSECRET=$client_secret
-#Login user if not already authenticated
-if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
-    echo "$(date '+%F %T') Performing login..."
-    bw login --apikey --method 0 --quiet --nointeraction
-fi
+echo "$(date '+%F %T') Performing login..."
+bw login --apikey --method 0 --quiet --nointeraction
 if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to login."
     echo
@@ -175,11 +216,11 @@ if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
 fi
 
 #Unlock the vault
-echo "$(date '+%F %T') Unlocking the vault..." 
+echo "$(date '+%F %T') Unlocking the vault..."
 session_key=$(bw unlock "$bw_password" --raw)
+unlock_result=$?
 #Verify that unlock succeeded
-
-if [[ $session_key == "" ]] ||  [[ " $session_key"  == "0" ]]; then
+if [[ $unlock_result -ne 0 ]] || [[ -z $session_key ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to unlock vault with BW_PASSWORD."
     exit 1
 else
@@ -281,11 +322,7 @@ if [[ $trash_count -gt 0 ]]; then
 fi
 
 echo
-bw lock
-bw logout
-BW_CLIENTID=
-BW_CLIENTSECRET=
-BW_SESSION=
+close_session
 
 if [ -n "${KEEP_LAST_BACKUPS}" ]; then
     echo "$(date '+%F %T') $(date '+%F %T') Starting cleaning previous backups..."
