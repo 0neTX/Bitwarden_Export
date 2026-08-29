@@ -1,0 +1,68 @@
+# End-to-end test environment for issue #21.
+#
+# Brings up a throwaway Vaultwarden and a bw-export built from the repo
+# Dockerfile (never the published image, which does not contain the fix).
+#
+# Everything it writes lives under tests/e2e/, which is gitignored.
+#
+#   docker compose -f tests/compose.test.yml up -d vaultwarden
+#   docker compose -f tests/compose.test.yml run --rm bw-export
+#
+# The #21 regression only reproduces when the SAME container is restarted, so
+# use `docker compose -f tests/compose.test.yml start bw-export`, never
+# `up --force-recreate`.
+
+services:
+  vaultwarden:
+    image: docker.io/vaultwarden/server:1.37.2
+    container_name: bwtest-vaultwarden
+    environment:
+      - SIGNUPS_ALLOWED=true
+      - INVITATIONS_ALLOWED=true
+      - ORG_CREATION_USERS=all
+      - DOMAIN=https://vw.test
+      - ROCKET_PORT=80
+      - LOG_LEVEL=info
+    volumes:
+      - ./e2e/vw:/data
+    ports:
+      - "127.0.0.1:8080:80"
+
+  # The Bitwarden CLI refuses plain-HTTP servers ("Insecure URL not allowed"),
+  # so Vaultwarden is fronted by TLS with a throwaway CA. See tests/e2e-setup.sh.
+  vw-tls:
+    image: docker.io/library/nginx:alpine
+    container_name: bwtest-vw-tls
+    depends_on:
+      - vaultwarden
+    volumes:
+      - ./e2e/nginx/vw.conf:/etc/nginx/conf.d/default.conf:ro,z
+      - ./e2e/certs:/certs:ro,z
+    networks:
+      default:
+        aliases:
+          - vw.test
+    ports:
+      - "127.0.0.1:8443:443"
+
+  bw-export:
+    image: localhost/bw-export:local
+    container_name: bwtest-bw-export
+    build:
+      context: ..
+      dockerfile: ./Dockerfile
+    tty: true
+    depends_on:
+      - vw-tls
+    volumes:
+      - ./e2e/data:/var/data
+      - ./e2e/att:/var/attachments
+      - ./e2e/certs/ca.crt:/certs/ca.crt:ro,z
+    environment:
+      - NODE_EXTRA_CA_CERTS=/certs/ca.crt
+      - BW_URL_SERVER=https://vw.test
+      - BW_CLIENTID=${BW_CLIENTID:-}
+      - BW_CLIENTSECRET=${BW_CLIENTSECRET:-}
+      - BW_PASSWORD=${BW_PASSWORD:-}
+      - EXPORT_PASSWORD=${EXPORT_PASSWORD:-}
+      - ATTACHMENTS_PATH=/var/attachments/
