@@ -66,6 +66,13 @@ case "$1" in
         shift
       done
       printf 'ATTACHMENT\t%s\t%s\t%s\n' "$itemid" "$file" "$out" >> "${BW_ATTACHLOG:-/dev/null}"
+      # BW_FAIL_ATTACH names a fileName whose download fails, the way it does
+      # when a proxy answers /attachments/ with a login page: message, exit 1,
+      # nothing written.
+      if [ -n "${BW_FAIL_ATTACH:-}" ] && [ "$file" = "$BW_FAIL_ATTACH" ]; then
+        echo "An error occurred while saving the attachment." >&2
+        exit 1
+      fi
       mkdir -p "$out" && printf 'attachment-content\n' > "$out/$file"
     fi
     exit 0 ;;

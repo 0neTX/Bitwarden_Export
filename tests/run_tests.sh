@@ -7,7 +7,7 @@ pass=0; fail=0
 # Sets up a fresh sandbox; $1 = a snippet that seeds the CLI state file.
 setup() {
   unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR \
-        BW_ITEMS_FILE BW_ATTACHLOG
+        BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH
   rm -rf "$SP/sbx"; mkdir -p "$SP/sbx/out" "$SP/sbx/att"
   export BW_STATE="$SP/sbx/state" BW_CALLLOG="$SP/sbx/calls"
   : > "$BW_CALLLOG"
@@ -243,6 +243,47 @@ check "empty name falls back"    "$(compgen -G "$SP/sbx/att/*/unnamed/u.txt" >/d
 check "all six downloaded" "$([ "$(grep -c '^ATTACHMENT' "$SP/sbx/attach")" = 6 ]; echo $?)" "$(cat "$SP/sbx/attach")"
 check "no directory nesting at all" "$([ "$(find "$SP/sbx/att" -mindepth 3 -type d | wc -l)" = 0 ]; echo $?)" "$(find "$SP/sbx/att" -mindepth 3 -type d)"
 unset BW_ITEMS_FILE BW_ATTACHLOG
+
+echo "=== T20: an attachment that fails to download must not pass as a good backup ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+printf '%s' '[{"id":"i1","name":"Ok","attachments":[{"fileName":"good.txt"}]},
+              {"id":"i2","name":"Broken","attachments":[{"fileName":"bad.txt"}]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json" BW_FAIL_ATTACH=bad.txt
+rc=$(run)
+check "exit 1 (incomplete backup)" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "counts the failure" "$(grep -q '1 attachment(s) could not be saved' "$SP/sbx/output"; echo $?)" "$(tail -4 "$SP/sbx/output")"
+check "says the backup is incomplete" "$(grep -q 'This backup is incomplete' "$SP/sbx/output"; echo $?)" "no final warning"
+check "no 'Have a good day'" "$(! grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "reported success anyway"
+check "the good one was still saved" "$(compgen -G "$SP/sbx/att/*/Ok/good.txt" >/dev/null; echo $?)" "$(find "$SP/sbx/att" -type f)"
+check "session still closed" "$(state_is_clean; echo $?)" "$(cat "$BW_STATE")"
+
+echo "=== T21: every attachment failing is still counted, not just the first ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+printf '%s' '[{"id":"i1","name":"A","attachments":[{"fileName":"bad.txt"}]},
+              {"id":"i2","name":"B","attachments":[{"fileName":"bad.txt"}]},
+              {"id":"i3","name":"C","attachments":[{"fileName":"bad.txt"}]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json" BW_FAIL_ATTACH=bad.txt
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "counts all three" "$(grep -q '3 attachment(s) could not be saved' "$SP/sbx/output"; echo $?)" "$(grep -o '[0-9]* attachment(s) could not be saved' "$SP/sbx/output")"
+check "all three were attempted" "$([ "$(grep -c '^ATTACHMENT' "$SP/sbx/attach")" = 3 ]; echo $?)" "$(cat "$SP/sbx/attach")"
+
+echo "=== T22: attachments all succeeding must still exit 0 ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+printf '%s' '[{"id":"i1","name":"A","attachments":[{"fileName":"a.txt"}]},
+              {"id":"i2","name":"B","attachments":[{"fileName":"b.txt"}]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "reports success" "$(grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "no success message"
+check "no spurious failure count" "$(! grep -q 'could not be saved' "$SP/sbx/output"; echo $?)" "claimed a failure"
+unset BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH
 
 echo
 echo "PASS=$pass FAIL=$fail"

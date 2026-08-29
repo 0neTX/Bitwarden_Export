@@ -309,14 +309,20 @@ fi
 # every target filesystem accepts: "/" and "\" would be read as path
 # separators, and NTFS (this image is commonly bind-mounted onto Windows
 # volumes) rejects < > : " | ? * and trailing dots or spaces outright.
+attachments_failed=0
 items_json=$(bw list items)
 # An item without attachments carries an empty array, not null, so counting the
 # attachments themselves is the only way to tell whether there is work to do.
 if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]]; then
     echo
     echo "$(date '+%F %T') Saving attachments..."
+    # The loop runs in this shell (process substitution, not a pipe), so the
+    # count survives it. A failed download is only reported by the CLI's exit
+    # status; on stdout it looks much like a successful one.
     while IFS=$'\t' read -r item_id file_name output_dir; do
-        bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir"
+        if ! bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir"; then
+            attachments_failed=$((attachments_failed + 1))
+        fi
     done < <(jq -r --arg dir "$runtime_save_folder_attachments" '
         .[] | . as $item | (.attachments // [])[] | . as $attachment
         | (($item.name // "")
@@ -326,6 +332,11 @@ if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]];
             $attachment.fileName,
             $dir + (if $folder == "" then "unnamed" else $folder end) + "/" ]
         | @tsv' <<<"$items_json")
+    if [[ $attachments_failed -gt 0 ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: $attachments_failed attachment(s) could not be saved."
+        echo "$(date '+%F %T') A reverse proxy that intercepts /attachments/ is a common cause: the"
+        echo "$(date '+%F %T') CLI is handed a login page and cannot decrypt it. Check that path is reachable."
+    fi
 else
     echo
     echo "$(date '+%F %T') No attachments exist, so nothing to export."
@@ -376,6 +387,15 @@ if [ -n "${KEEP_LAST_BACKUPS}" ]; then
         done
     fi
     echo "$(date '+%F %T') $(date '+%F %T') Finish clean previous backups..."
+fi
+
+# An export missing attachments is an incomplete backup, so say so and fail.
+# Silence here is what let a broken backup look healthy run after run.
+if [[ $attachments_failed -gt 0 ]]; then
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Exporting finished, but $attachments_failed attachment(s) are missing."
+    echo "$(date '+%F %T') This backup is incomplete."
+    echo
+    exit 1
 fi
 
 echo -e "\n$(date '+%F %T') ${IGreen} Info: Exporting finished. Have a good day"
