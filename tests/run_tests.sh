@@ -7,7 +7,7 @@ pass=0; fail=0
 # Sets up a fresh sandbox; $1 = a snippet that seeds the CLI state file.
 setup() {
   unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR \
-        BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH
+        BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS
   rm -rf "$SP/sbx"; mkdir -p "$SP/sbx/out" "$SP/sbx/att"
   export BW_STATE="$SP/sbx/state" BW_CALLLOG="$SP/sbx/calls"
   : > "$BW_CALLLOG"
@@ -284,6 +284,33 @@ check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
 check "reports success" "$(grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "no success message"
 check "no spurious failure count" "$(! grep -q 'could not be saved' "$SP/sbx/output"; echo $?)" "claimed a failure"
 unset BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH
+
+echo "=== T23: an incomplete export must not rotate a complete backup out ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+mkdir -p "$SP/sbx/out/20200101000000-bw-export" "$SP/sbx/out/20200102000000-bw-export" \
+         "$SP/sbx/att/20200101000000-bw-export" "$SP/sbx/att/20200102000000-bw-export"
+printf '%s' '[{"id":"i1","name":"Broken","attachments":[{"fileName":"bad.txt"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json" BW_FAIL_ATTACH=bad.txt KEEP_LAST_BACKUPS=1
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says it is keeping them" "$(grep -q 'keeping all previous backups' "$SP/sbx/output"; echo $?)" "$(tail -5 "$SP/sbx/output")"
+check "old vault backups untouched" "$([ -d "$SP/sbx/out/20200101000000-bw-export" ] && [ -d "$SP/sbx/out/20200102000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
+check "old attachment backups untouched" "$([ -d "$SP/sbx/att/20200101000000-bw-export" ] && [ -d "$SP/sbx/att/20200102000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/att")"
+check "did not run the cleanup" "$(! grep -q 'Starting cleaning previous backups' "$SP/sbx/output"; echo $?)" "pruned anyway"
+
+echo "=== T24: a complete export still rotates as configured ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+mkdir -p "$SP/sbx/out/20200101000000-bw-export" "$SP/sbx/out/20200102000000-bw-export"
+printf '%s' '[{"id":"i1","name":"Ok","attachments":[{"fileName":"good.txt"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json" KEEP_LAST_BACKUPS=1
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "ran the cleanup" "$(grep -q 'Starting cleaning previous backups' "$SP/sbx/output"; echo $?)" "skipped it"
+check "oldest was deleted" "$([ ! -d "$SP/sbx/out/20200101000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
+check "only KEEP_LAST_BACKUPS remain" "$([ "$(find "$SP/sbx/out" -maxdepth 1 -name '*-bw-export' -type d | wc -l)" = 1 ]; echo $?)" "$(ls "$SP/sbx/out")"
+unset BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS
 
 echo
 echo "PASS=$pass FAIL=$fail"

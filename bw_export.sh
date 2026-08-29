@@ -357,7 +357,14 @@ fi
 echo
 close_session
 
-if [ -n "${KEEP_LAST_BACKUPS}" ]; then
+# Rotation deletes the oldest backup to make room for this one. When this one is
+# missing attachments that trades a complete backup for an incomplete one, and
+# repeated often enough it leaves nothing complete at all.
+if [ -n "${KEEP_LAST_BACKUPS}" ] && [[ $attachments_failed -gt 0 ]]; then
+    echo -e "\n$(date '+%F %T') ${IYellow}Warning: keeping all previous backups."
+    echo "$(date '+%F %T') This export is missing $attachments_failed attachment(s), so no older"
+    echo "$(date '+%F %T') backup is rotated out for it. Fix the failure and run again."
+elif [ -n "${KEEP_LAST_BACKUPS}" ]; then
     echo "$(date '+%F %T') $(date '+%F %T') Starting cleaning previous backups..."
     echo
     re='^[0-9]+$'
