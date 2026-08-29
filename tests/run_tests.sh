@@ -6,7 +6,8 @@ pass=0; fail=0
 
 # Sets up a fresh sandbox; $1 = a snippet that seeds the CLI state file.
 setup() {
-  unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR
+  unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR \
+        BW_ITEMS_FILE BW_ATTACHLOG
   rm -rf "$SP/sbx"; mkdir -p "$SP/sbx/out" "$SP/sbx/att"
   export BW_STATE="$SP/sbx/state" BW_CALLLOG="$SP/sbx/calls"
   : > "$BW_CALLLOG"
@@ -166,6 +167,82 @@ rc=$( cd "$SP/sbx" && export PATH="$SP/mock:$PATH" OUTPUT_PATH="$SP/sbx/out" ATT
       bash "$SCRIPT" > "$SP/sbx/output" 2>&1; echo $? )
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
 check "override respected" "$(grep -q 'APPDATA=\[/custom/state\]' "$SP/sbx/calls"; echo $?)" "got: $(grep -m1 APPDATA "$SP/sbx/calls")"
+
+echo
+echo "=== T15: a vault with items but no attachments must say so ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+# The CLI reports an empty array, not null, for an item without attachments.
+printf '%s' '[{"id":"i1","name":"Plain","attachments":[]},{"id":"i2","name":"Other","attachments":[]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "reports nothing to export" "$(grep -q 'No attachments exist' "$SP/sbx/output"; echo $?)" "$(tail -3 "$SP/sbx/output")"
+check "does NOT claim to be saving" "$(! grep -q 'Saving attachments' "$SP/sbx/output"; echo $?)" "claimed to save nothing"
+check "no attachment downloaded" "$([ ! -s "$SP/sbx/attach" ]; echo $?)" "$(cat "$SP/sbx/attach" 2>/dev/null)"
+check "lists items only once" "$([ "$(grep -c '^bw list items$' "$SP/sbx/calls")" = 1 ]; echo $?)" "count=$(grep -c '^bw list items$' "$SP/sbx/calls")"
+
+echo "=== T16: an item that does have an attachment is downloaded ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+printf '%s' '[{"id":"i1","name":"Plain","attachments":[]},{"id":"i2","name":"Doc","attachments":[{"fileName":"cv.pdf"}]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "announces saving" "$(grep -q 'Saving attachments' "$SP/sbx/output"; echo $?)" "no message"
+check "downloaded exactly one" "$([ "$(grep -c '^ATTACHMENT' "$SP/sbx/attach")" = 1 ]; echo $?)" "$(cat "$SP/sbx/attach")"
+check "correct itemid and file" "$(grep -qP '^ATTACHMENT\ti2\tcv\.pdf\t' "$SP/sbx/attach"; echo $?)" "$(cat "$SP/sbx/attach")"
+check "file written under the item name" "$(compgen -G "$SP/sbx/att/*/Doc/cv.pdf" >/dev/null; echo $?)" "$(find "$SP/sbx/att" -type f)"
+
+echo "=== T17: a hostile item name must not reach the shell (command injection) ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+rm -f "$SP/sbx/PWNED"
+# $(...) and backticks in a name; the old code built shell text and ran it.
+printf '%s' '[{"id":"i1","name":"INJ$(touch '"$SP"'/sbx/PWNED)END","attachments":[{"fileName":"a.txt"}]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "payload did NOT execute" "$([ ! -e "$SP/sbx/PWNED" ]; echo $?)" "the name was evaluated as shell"
+check "name passed through verbatim" "$(grep -qF 'INJ$(touch' "$SP/sbx/attach"; echo $?)" "$(cat "$SP/sbx/attach")"
+
+echo "=== T18: a hostile attachment file name must not reach the shell either ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+rm -f "$SP/sbx/PWNED2"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"x$(touch '"$SP"'/sbx/PWNED2)y"}]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+check "payload did NOT execute" "$([ ! -e "$SP/sbx/PWNED2" ]; echo $?)" "the file name was evaluated as shell"
+check "file name passed through verbatim" "$(grep -qF 'x$(touch' "$SP/sbx/attach"; echo $?)" "$(cat "$SP/sbx/attach")"
+
+echo "=== T19: the item name becomes a directory every filesystem accepts ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+# "/" and "\" are separators; NTFS also rejects < > : " | ? * and trailing dots.
+printf '%s' '[{"id":"i1","name":"He said \"hi\"","attachments":[{"fileName":"q.txt"}]},
+              {"id":"i2","name":"Foo/Bar","attachments":[{"fileName":"s.txt"}]},
+              {"id":"i3","name":"a<b>c:d|e?f*g","attachments":[{"fileName":"m.txt"}]},
+              {"id":"i4","name":"back\\slash","attachments":[{"fileName":"b.txt"}]},
+              {"id":"i5","name":"trailing. ","attachments":[{"fileName":"t.txt"}]},
+              {"id":"i6","name":"...","attachments":[{"fileName":"u.txt"}]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "quotes replaced"          "$(compgen -G "$SP/sbx/att/*/He said _hi_/q.txt" >/dev/null; echo $?)" "$(find "$SP/sbx/att" -type d)"
+check "slash does not nest"      "$(compgen -G "$SP/sbx/att/*/Foo_Bar/s.txt" >/dev/null; echo $?)"      "$(find "$SP/sbx/att" -type d)"
+check "NTFS-illegal replaced"    "$(compgen -G "$SP/sbx/att/*/a_b_c_d_e_f_g/m.txt" >/dev/null; echo $?)" "$(find "$SP/sbx/att" -type d)"
+check "backslash does not nest"  "$(compgen -G "$SP/sbx/att/*/back_slash/b.txt" >/dev/null; echo $?)"   "$(find "$SP/sbx/att" -type d)"
+check "trailing dot/space gone"  "$(compgen -G "$SP/sbx/att/*/trailing/t.txt" >/dev/null; echo $?)"     "$(find "$SP/sbx/att" -type d)"
+check "empty name falls back"    "$(compgen -G "$SP/sbx/att/*/unnamed/u.txt" >/dev/null; echo $?)"      "$(find "$SP/sbx/att" -type d)"
+check "all six downloaded" "$([ "$(grep -c '^ATTACHMENT' "$SP/sbx/attach")" = 6 ]; echo $?)" "$(cat "$SP/sbx/attach")"
+check "no directory nesting at all" "$([ "$(find "$SP/sbx/att" -mindepth 3 -type d | wc -l)" = 0 ]; echo $?)" "$(find "$SP/sbx/att" -mindepth 3 -type d)"
+unset BW_ITEMS_FILE BW_ATTACHLOG
 
 echo
 echo "PASS=$pass FAIL=$fail"

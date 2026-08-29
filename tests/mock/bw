@@ -47,7 +47,28 @@ case "$1" in
 
   list)
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
-    case "$2" in organizations) echo '[]';; items) echo '[]';; *) echo '[]';; esac; exit 0 ;;
+    # "list items --trash" is a different question; only the vault listing is seeded.
+    if [ "$2" = items ] && [ "$3" != --trash ] && [ -s "${BW_ITEMS_FILE:-}" ]; then
+      cat "$BW_ITEMS_FILE"
+    else
+      echo '[]'
+    fi
+    exit 0 ;;
+
+  get)
+    # bw get attachment <fileName> --itemid <id> --output <dir>
+    # Records argv verbatim so a test can prove nothing was shell-expanded.
+    [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
+    if [ "$2" = attachment ]; then
+      file="$3"
+      while [ $# -gt 0 ]; do
+        case "$1" in --itemid) itemid="$2"; shift;; --output) out="$2"; shift;; esac
+        shift
+      done
+      printf 'ATTACHMENT\t%s\t%s\t%s\n' "$itemid" "$file" "$out" >> "${BW_ATTACHLOG:-/dev/null}"
+      mkdir -p "$out" && printf 'attachment-content\n' > "$out/$file"
+    fi
+    exit 0 ;;
   export)
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
     [ -n "$BW_SLOW_EXPORT" ] && sleep 5

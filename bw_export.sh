@@ -301,11 +301,31 @@ else
 fi
 
 # 3. Download all attachments (file backup)
-#First download attachments in vault
-if [[ $(bw list items | jq -r '.[] | select(.attachments != null)') != "" ]]; then
+# Item and file names are attacker-controlled: anyone who can put an item in a
+# shared organization collection chooses them. They are therefore passed to the
+# CLI as arguments and never interpolated into shell text.
+#
+# The item name also becomes a directory name, so it is reduced to something
+# every target filesystem accepts: "/" and "\" would be read as path
+# separators, and NTFS (this image is commonly bind-mounted onto Windows
+# volumes) rejects < > : " | ? * and trailing dots or spaces outright.
+items_json=$(bw list items)
+# An item without attachments carries an empty array, not null, so counting the
+# attachments themselves is the only way to tell whether there is work to do.
+if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]]; then
     echo
     echo "$(date '+%F %T') Saving attachments..."
-    bash <(bw list items | jq -r '.[]  | select(.attachments != null) | "bw get attachment \"\(.attachments[].fileName)\" --itemid \(.id) --output \"'"$runtime_save_folder_attachments"'\(.name)/\""')
+    while IFS=$'\t' read -r item_id file_name output_dir; do
+        bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir"
+    done < <(jq -r --arg dir "$runtime_save_folder_attachments" '
+        .[] | . as $item | (.attachments // [])[] | . as $attachment
+        | (($item.name // "")
+           | gsub("[/<>:\"\\\\|?*[:cntrl:]]"; "_")
+           | sub(" +$"; "") | sub("\\.+$"; "")) as $folder
+        | [ $item.id,
+            $attachment.fileName,
+            $dir + (if $folder == "" then "unnamed" else $folder end) + "/" ]
+        | @tsv' <<<"$items_json")
 else
     echo
     echo "$(date '+%F %T') No attachments exist, so nothing to export."
