@@ -13,7 +13,10 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 
 # Update Ubuntu Software repository
-RUN apt-get update && apt-get install -y  bash curl unzip jq wget && curl -1sLf \
+# procps provides pkill, which the entrypoint needs to pass a container stop on
+# to the export. The base image happens to ship it; declare it so a slimmer base
+# cannot drop it silently.
+RUN apt-get update && apt-get install -y  bash curl unzip jq wget procps && curl -1sLf \
 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
 && apt-get update && apt-get install -y infisical  \
 && echo "**** cleanup ****" && \

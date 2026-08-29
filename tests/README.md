@@ -93,6 +93,39 @@ Unlocking the vault...
 ERROR: Failed to unlock vault with BW_PASSWORD.
 ```
 
+### Checking the entrypoint
+
+`entrypoint.sh` is too coupled to the image (`su`, `pkill`, `shoutrrr`) to cover
+with the mock, so its two behaviours are verified against a container:
+
+**It reports failure.** Run with credentials that cannot work and read the exit
+code, not the log:
+
+```bash
+docker run --name t -e BW_CLIENTID=bogus -e BW_CLIENTSECRET=bogus \
+    -e BW_PASSWORD=bogus localhost/bw-export:local
+docker inspect -f '{{.State.ExitCode}}' t     # 1, and 0 before this was fixed
+```
+
+**It passes stop signals on.** Interrupt a run and check the export got to clean
+up after itself:
+
+```bash
+docker start bwtest-bw-export
+until docker logs bwtest-bw-export 2>&1 | grep -q 'Vault unlocked'; do sleep 1; done
+docker stop -t 30 bwtest-bw-export
+docker logs bwtest-bw-export | grep 'Closing Bitwarden CLI session'   # must appear
+docker inspect -f '{{.State.ExitCode}}' bwtest-bw-export              # 143, not 137
+```
+
+143 means it was asked to stop and did; 137 means it ignored the request and was
+killed. The next run should then start without logging `Existing session
+detected`, because nothing was left behind.
+
+The cleanup only runs once the `bw` command in flight returns, so on a large
+vault give `docker stop` more than its default 10 seconds (`-t`, or
+`stop_grace_period` in compose).
+
 ### Teardown
 
 ```bash
