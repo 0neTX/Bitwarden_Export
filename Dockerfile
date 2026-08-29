@@ -51,9 +51,9 @@ RUN unzip /tmp/bw.zip && \
     echo "**** create abc user and make our folders ****" && \
     useradd -u 911 -U bitwarden && \
     usermod -G users bitwarden && \
-    mkdir /home/bitwarden && \
-    mkdir /var/data && \
-    mkdir /var/attachment && \
+    mkdir -p /home/bitwarden && \
+    mkdir -p /var/data && \
+    mkdir -p /var/attachment && \
     chown -R  bitwarden:bitwarden /home/bitwarden  && \    
     chown -R  bitwarden:bitwarden /app  && \
     chown -R  bitwarden:bitwarden /var/data  && \
