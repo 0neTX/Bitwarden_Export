@@ -33,7 +33,7 @@ RUN tar -xf shoutrrr_linux_amd64.tar.gz && \
         chmod +x shoutrrr
         
 # Installing BW_CLI_VERSION version of Bitwarden CLI
-ENV BW_CLI_VERSION="2025.11.0"
+ENV BW_CLI_VERSION="2026.8.0"
 ADD https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}/bw-linux-${BW_CLI_VERSION}.zip /tmp/bw.zip
 
 # Copy script
