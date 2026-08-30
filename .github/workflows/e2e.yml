@@ -1,0 +1,43 @@
+name: E2E
+
+# The unit suite runs against a mock of the Bitwarden CLI, so it cannot notice
+# when a CLI release changes behaviour — and they do: 2026.8.0 started refusing
+# plain-HTTP servers. This drives the real CLI against a real Vaultwarden.
+#
+# It needs no credentials: the environment registers its own throwaway account.
+# Nightly rather than per-PR because it takes minutes, not seconds. Public repos
+# get unlimited GitHub-hosted minutes, so the schedule is free.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+jobs:
+  e2e:
+    name: real CLI against a real Vaultwarden
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      # bootstrap_vault.py implements the client-side crypto that account
+      # registration needs; the runner does not ship cryptography.
+      - name: Install python dependency
+        run: pip install --quiet cryptography
+
+      # Anonymous pulls share the runner's IP and hit Docker Hub's rate limit.
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build the environment and seed a vault
+        run: bash tests/e2e-setup.sh
+
+      - name: Export, and recover from a stale session
+        run: bash tests/e2e-verify.sh
+
+      - name: Vaultwarden log on failure
+        if: failure()
+        run: docker logs bwtest-vaultwarden 2>&1 | tail -50
