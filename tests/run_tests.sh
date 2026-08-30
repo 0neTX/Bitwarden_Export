@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # Test harness for bw_export.sh against the stateful bw mock.
+#
+# Assertions read as `check "name" "$([ cond ]; echo $?)" "detail"`, where $? is
+# meant to be the condition's status. That is what SC2319 warns about, so it is
+# silenced here rather than at ~80 call sites. Each run() is deliberately a
+# subshell so its environment cannot leak into the next test, which is what
+# SC2030/SC2031 flag. The injection tests carry payloads that must stay literal,
+# so SC2016 ("expressions don't expand in single quotes") is the point of them.
+# shellcheck disable=SC2319,SC2030,SC2031,SC2016
 SP="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="${SCRIPT:?}"
 pass=0; fail=0
@@ -29,7 +37,7 @@ check() { # name, condition-result(0/1), detail
   else echo "  FAIL  $1  -- $3"; fail=$((fail+1)); fi
 }
 state_is_clean() { grep -q '^auth=0' "$BW_STATE"; }
-exported()       { [ -f "$SP/sbx/out"/*/export.json ] 2>/dev/null || compgen -G "$SP/sbx/out/*/export.json" >/dev/null; }
+exported()       { compgen -G "$SP/sbx/out/*/export.json" >/dev/null; }
 
 echo "=== T1: cold start (no cached state) ==="
 setup ""

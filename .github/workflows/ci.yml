@@ -1,0 +1,43 @@
+name: CI
+
+# Nothing gated the publish workflows before this: a broken bw_export.sh could
+# reach :beta and then :latest without a single check running.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  test:
+    name: shellcheck + unit suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # shellcheck and jq are already on ubuntu-latest runners.
+      - name: shellcheck
+        run: shellcheck bw_export.sh entrypoint.sh tests/mock/bw tests/run_tests.sh
+
+      # 80 assertions against a stateful mock of the Bitwarden CLI. This covers
+      # the script's logic only; it says nothing about the real CLI, which the
+      # end-to-end suite in tests/e2e-setup.sh exercises.
+      - name: unit suite
+        run: SCRIPT="$PWD/bw_export.sh" bash tests/run_tests.sh
+
+  build:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Build only. Catches a broken Dockerfile at review time rather than when
+      # a publish workflow pushes it to Docker Hub.
+      - name: build image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
