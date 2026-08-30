@@ -44,3 +44,7 @@ docker-compose.prod.yml
 docker-compose.*.yml
 .infisical.json
 .vs/
+# e2e test runtime data (vaultwarden db, exports, throwaway secrets)
+tests/e2e/
+tests/sbx/
+__pycache__/

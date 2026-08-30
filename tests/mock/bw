@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Stateful mock of the Bitwarden CLI.
+#   BW_STATE      : file holding the CLI's persisted state (~/.config/Bitwarden CLI/data.json)
+#   BW_REAL_PW    : the master password the *server* currently accepts
+#   BW_FAIL_CONFIG/BW_FAIL_LOGIN : force those subcommands to fail
+STATE="${BW_STATE:?}"
+LOG="${BW_CALLLOG:-/dev/null}"
+echo "bw $*" >> "$LOG"
+echo "APPDATA=[${BITWARDENCLI_APPDATA_DIR-<UNSET>}]" >> "$LOG"
+
+auth=0; locked=1; cached_pw=""; server="https://vault.bitwarden.com"
+# shellcheck disable=SC1090
+[ -f "$STATE" ] && . "$STATE"
+
+save() { printf 'auth=%s\nlocked=%s\ncached_pw=%q\nserver=%q\n' "$auth" "$locked" "$cached_pw" "$server" > "$STATE"; }
+
+case "$1" in
+  status)
+    if   [ "$auth" = 0 ];   then st=unauthenticated
+    elif [ "$locked" = 1 ]; then st=locked
+    else                         st=unlocked; fi
+    printf '{"serverUrl":"%s","status":"%s"}\n' "$server" "$st"; exit 0 ;;
+
+  config)
+    [ -n "$BW_FAIL_CONFIG" ] && { echo "mock: config rejected" >&2; exit 1; }
+    # Real CLI refuses to change the server while an account is present.
+    if [ "$auth" = 1 ]; then echo "Logout required before server config update." >&2; exit 1; fi
+    server="$3"; save; echo "Saved setting \`config\`."; exit 0 ;;
+
+  login)
+    [ -n "$BW_FAIL_LOGIN" ] && { echo "mock: login failed" >&2; exit 1; }
+    if [ "$auth" = 1 ]; then echo "You are already logged in" >&2; exit 1; fi
+    auth=1; locked=1; cached_pw="${BW_REAL_PW:?}"; save; exit 0 ;;
+
+  unlock)
+    if [ "$auth" = 0 ];   then echo "You are not logged in." >&2; exit 1; fi
+    if [ "$locked" = 0 ]; then echo "Vault is already unlocked." >&2; exit 1; fi
+    # The CLI validates the password against its *cached* profile, not the server.
+    if [ "$2" != "$cached_pw" ]; then echo "Invalid master password." >&2; exit 1; fi
+    locked=0; save; echo "mock-session-key-$$"; exit 0 ;;
+
+  lock)   [ -n "$BW_FAIL_LOGOUT" ] && exit 1
+          [ "$auth" = 0 ] && { echo "not logged in" >&2; exit 1; }; locked=1; save; exit 0 ;;
+  logout) [ -n "$BW_FAIL_LOGOUT" ] && { echo "mock: logout refused" >&2; exit 1; }
+          [ "$auth" = 0 ] && { echo "You are not logged in." >&2; exit 1; }
+          auth=0; locked=1; cached_pw=""; server="https://vault.bitwarden.com"; save; exit 0 ;;
+
+  list)
+    [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
+    # "list items --trash" is a different question; only the vault listing is seeded.
+    if [ "$2" = items ] && [ "$3" != --trash ] && [ -s "${BW_ITEMS_FILE:-}" ]; then
+      cat "$BW_ITEMS_FILE"
+    else
+      echo '[]'
+    fi
+    exit 0 ;;
+
+  get)
+    # bw get attachment <fileName> --itemid <id> --output <dir>
+    # Records argv verbatim so a test can prove nothing was shell-expanded.
+    [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
+    if [ "$2" = attachment ]; then
+      file="$3"
+      while [ $# -gt 0 ]; do
+        case "$1" in --itemid) itemid="$2"; shift;; --output) out="$2"; shift;; esac
+        shift
+      done
+      printf 'ATTACHMENT\t%s\t%s\t%s\n' "$itemid" "$file" "$out" >> "${BW_ATTACHLOG:-/dev/null}"
+      # BW_FAIL_ATTACH names a fileName whose download fails, the way it does
+      # when a proxy answers /attachments/ with a login page: message, exit 1,
+      # nothing written.
+      if [ -n "${BW_FAIL_ATTACH:-}" ] && [ "$file" = "$BW_FAIL_ATTACH" ]; then
+        echo "An error occurred while saving the attachment." >&2
+        exit 1
+      fi
+      mkdir -p "$out" && printf 'attachment-content\n' > "$out/$file"
+    fi
+    exit 0 ;;
+  export)
+    [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
+    [ -n "$BW_SLOW_EXPORT" ] && sleep 5
+    for a in "$@"; do [ "$prev" = "--output" ] && out="$a"; prev="$a"; done
+    mkdir -p "$out" && : > "$out/export.json"; exit 0 ;;
+  *) exit 0 ;;
+esac

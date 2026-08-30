@@ -13,7 +13,10 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 
 # Update Ubuntu Software repository
-RUN apt-get update && apt-get install -y  bash curl unzip jq wget && curl -1sLf \
+# procps provides pkill, which the entrypoint needs to pass a container stop on
+# to the export. The base image happens to ship it; declare it so a slimmer base
+# cannot drop it silently.
+RUN apt-get update && apt-get install -y  bash curl unzip jq wget procps && curl -1sLf \
 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
 && apt-get update && apt-get install -y infisical  \
 && echo "**** cleanup ****" && \
@@ -33,7 +36,7 @@ RUN tar -xf shoutrrr_linux_amd64.tar.gz && \
         chmod +x shoutrrr
         
 # Installing BW_CLI_VERSION version of Bitwarden CLI
-ENV BW_CLI_VERSION="2025.11.0"
+ENV BW_CLI_VERSION="2026.8.0"
 ADD https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}/bw-linux-${BW_CLI_VERSION}.zip /tmp/bw.zip
 
 # Copy script
@@ -51,9 +54,9 @@ RUN unzip /tmp/bw.zip && \
     echo "**** create abc user and make our folders ****" && \
     useradd -u 911 -U bitwarden && \
     usermod -G users bitwarden && \
-    mkdir /home/bitwarden && \
-    mkdir /var/data && \
-    mkdir /var/attachment && \
+    mkdir -p /home/bitwarden && \
+    mkdir -p /var/data && \
+    mkdir -p /var/attachment && \
     chown -R  bitwarden:bitwarden /home/bitwarden  && \    
     chown -R  bitwarden:bitwarden /app  && \
     chown -R  bitwarden:bitwarden /var/data  && \

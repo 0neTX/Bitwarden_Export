@@ -18,7 +18,9 @@
 # could not be exported.
 
 # Constant and global variables
-BITWARDENCLI_APPDATA_DIR="${BITWARDENCLI_APPDATA_DIR:-"$(pwd)"}"
+# Where the CLI keeps data.json (account, tokens, cached profile). Must be
+# exported or the CLI never sees it and silently falls back to its own default.
+export BITWARDENCLI_APPDATA_DIR="${BITWARDENCLI_APPDATA_DIR:-"$(pwd)"}"
 params_validated=0
 Yellow='\033[0;33m'  # Yellow
 IYellow='\033[0;93m' # Yellow
@@ -152,22 +154,63 @@ if [[ $params_validated != 0 ]]; then
     exit 1
 fi
 
+session_closed=0
+
+# Close the Bitwarden CLI session and wipe the credentials from the environment.
+# Idempotent: safe to call explicitly and from the EXIT trap.
+close_session() {
+    if [[ $session_closed -ne 0 ]]; then
+        return 0
+    fi
+    session_closed=1
+    echo "$(date '+%F %T') Closing Bitwarden CLI session..."
+    bw lock >/dev/null 2>&1 || true
+    bw logout >/dev/null 2>&1 || true
+    BW_CLIENTID=
+    BW_CLIENTSECRET=
+    BW_SESSION=
+}
+
 echo "$(date '+%F %T') $(date '+%F %T') Starting exporting..."
 echo
 
+BW_CLIENTID=$client_id
+BW_CLIENTSECRET=$client_secret
+
+# From here on the CLI holds state, so never leave a session behind: a leftover
+# session makes every later run fail at "bw config server" and at "bw unlock".
+# A bare EXIT trap is not enough, it does not run when the container is stopped.
+trap close_session EXIT
+trap 'close_session; exit 130' INT
+trap 'close_session; exit 143' TERM
+
+# Always start from a clean state. Credentials cached by a previous run go stale
+# whenever the server changes them (a server upgrade, a KDF or master password
+# change), and "bw unlock" validates the password against that cached copy, so a
+# stale cache fails forever until the account is logged out and logged in again.
+if [[ $(bw status | jq -r .status) != "unauthenticated" ]]; then
+    echo "$(date '+%F %T') Existing session detected. Logging out before starting..."
+    bw logout >/dev/null 2>&1 || true
+    if [[ $(bw status | jq -r .status) != "unauthenticated" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not log out the previous session."
+        echo "$(date '+%F %T') Remove the Bitwarden CLI data directory or recreate the container, then retry."
+        echo
+        exit 1
+    fi
+fi
+
 if [[ $bw_url_server != "" && $bw_url_server != *"bitwarden.com" ]]; then
     echo "$(date '+%F %T') Setting custom server..."
-    bw config server "$bw_url_server" --nointeraction
+    if ! bw config server "$bw_url_server" --nointeraction; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to set the server url: $bw_url_server"
+        echo
+        exit 1
+    fi
     echo
 fi
 
-BW_CLIENTID=$client_id
-BW_CLIENTSECRET=$client_secret
-#Login user if not already authenticated
-if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
-    echo "$(date '+%F %T') Performing login..."
-    bw login --apikey --method 0 --quiet --nointeraction
-fi
+echo "$(date '+%F %T') Performing login..."
+bw login --apikey --method 0 --quiet --nointeraction
 if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to login."
     echo
@@ -175,11 +218,11 @@ if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
 fi
 
 #Unlock the vault
-echo "$(date '+%F %T') Unlocking the vault..." 
+echo "$(date '+%F %T') Unlocking the vault..."
 session_key=$(bw unlock "$bw_password" --raw)
+unlock_result=$?
 #Verify that unlock succeeded
-
-if [[ $session_key == "" ]] ||  [[ " $session_key"  == "0" ]]; then
+if [[ $unlock_result -ne 0 ]] || [[ -z $session_key ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to unlock vault with BW_PASSWORD."
     exit 1
 else
@@ -258,11 +301,42 @@ else
 fi
 
 # 3. Download all attachments (file backup)
-#First download attachments in vault
-if [[ $(bw list items | jq -r '.[] | select(.attachments != null)') != "" ]]; then
+# Item and file names are attacker-controlled: anyone who can put an item in a
+# shared organization collection chooses them. They are therefore passed to the
+# CLI as arguments and never interpolated into shell text.
+#
+# The item name also becomes a directory name, so it is reduced to something
+# every target filesystem accepts: "/" and "\" would be read as path
+# separators, and NTFS (this image is commonly bind-mounted onto Windows
+# volumes) rejects < > : " | ? * and trailing dots or spaces outright.
+attachments_failed=0
+items_json=$(bw list items)
+# An item without attachments carries an empty array, not null, so counting the
+# attachments themselves is the only way to tell whether there is work to do.
+if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]]; then
     echo
     echo "$(date '+%F %T') Saving attachments..."
-    bash <(bw list items | jq -r '.[]  | select(.attachments != null) | "bw get attachment \"\(.attachments[].fileName)\" --itemid \(.id) --output \"'"$runtime_save_folder_attachments"'\(.name)/\""')
+    # The loop runs in this shell (process substitution, not a pipe), so the
+    # count survives it. A failed download is only reported by the CLI's exit
+    # status; on stdout it looks much like a successful one.
+    while IFS=$'\t' read -r item_id file_name output_dir; do
+        if ! bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir"; then
+            attachments_failed=$((attachments_failed + 1))
+        fi
+    done < <(jq -r --arg dir "$runtime_save_folder_attachments" '
+        .[] | . as $item | (.attachments // [])[] | . as $attachment
+        | (($item.name // "")
+           | gsub("[/<>:\"\\\\|?*[:cntrl:]]"; "_")
+           | sub(" +$"; "") | sub("\\.+$"; "")) as $folder
+        | [ $item.id,
+            $attachment.fileName,
+            $dir + (if $folder == "" then "unnamed" else $folder end) + "/" ]
+        | @tsv' <<<"$items_json")
+    if [[ $attachments_failed -gt 0 ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: $attachments_failed attachment(s) could not be saved."
+        echo "$(date '+%F %T') A reverse proxy that intercepts /attachments/ is a common cause: the"
+        echo "$(date '+%F %T') CLI is handed a login page and cannot decrypt it. Check that path is reachable."
+    fi
 else
     echo
     echo "$(date '+%F %T') No attachments exist, so nothing to export."
@@ -281,13 +355,16 @@ if [[ $trash_count -gt 0 ]]; then
 fi
 
 echo
-bw lock
-bw logout
-BW_CLIENTID=
-BW_CLIENTSECRET=
-BW_SESSION=
+close_session
 
-if [ -n "${KEEP_LAST_BACKUPS}" ]; then
+# Rotation deletes the oldest backup to make room for this one. When this one is
+# missing attachments that trades a complete backup for an incomplete one, and
+# repeated often enough it leaves nothing complete at all.
+if [ -n "${KEEP_LAST_BACKUPS}" ] && [[ $attachments_failed -gt 0 ]]; then
+    echo -e "\n$(date '+%F %T') ${IYellow}Warning: keeping all previous backups."
+    echo "$(date '+%F %T') This export is missing $attachments_failed attachment(s), so no older"
+    echo "$(date '+%F %T') backup is rotated out for it. Fix the failure and run again."
+elif [ -n "${KEEP_LAST_BACKUPS}" ]; then
     echo "$(date '+%F %T') $(date '+%F %T') Starting cleaning previous backups..."
     echo
     re='^[0-9]+$'
@@ -317,6 +394,15 @@ if [ -n "${KEEP_LAST_BACKUPS}" ]; then
         done
     fi
     echo "$(date '+%F %T') $(date '+%F %T') Finish clean previous backups..."
+fi
+
+# An export missing attachments is an incomplete backup, so say so and fail.
+# Silence here is what let a broken backup look healthy run after run.
+if [[ $attachments_failed -gt 0 ]]; then
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Exporting finished, but $attachments_failed attachment(s) are missing."
+    echo "$(date '+%F %T') This backup is incomplete."
+    echo
+    exit 1
 fi
 
 echo -e "\n$(date '+%F %T') ${IGreen} Info: Exporting finished. Have a good day"
