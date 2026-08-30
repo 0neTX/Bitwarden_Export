@@ -16,9 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # shellcheck and jq are already on ubuntu-latest runners.
+      # Pinned rather than using the runner's shellcheck: versions disagree about
+      # which findings exist, so an image update would fail unrelated pull
+      # requests. A function called only from a trap is SC2317 on 0.9 and SC2329
+      # on 0.11, which is exactly how this first went red.
       - name: shellcheck
-        run: shellcheck bw_export.sh entrypoint.sh tests/mock/bw tests/run_tests.sh
+        run: |
+          docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 \
+            bw_export.sh entrypoint.sh \
+            tests/mock/bw tests/run_tests.sh tests/e2e-setup.sh tests/e2e-verify.sh
 
       # 80 assertions against a stateful mock of the Bitwarden CLI. This covers
       # the script's logic only; it says nothing about the real CLI, which the

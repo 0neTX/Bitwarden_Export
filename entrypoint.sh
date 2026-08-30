@@ -46,7 +46,9 @@ set -o pipefail
 # returns, and "su" answers SIGTERM by killing its child outright rather than
 # passing it on. So run the pipeline in the background and signal the export
 # directly, giving it the chance to log out of the Bitwarden CLI on its way out.
-# shellcheck disable=SC2329  # invoked from the traps below
+# Invoked from the traps below, which shellcheck cannot see: older versions call
+# it unreachable (SC2317), newer ones call it uninvoked (SC2329).
+# shellcheck disable=SC2329,SC2317
 forward_signal() {
     # Only "no process matched" is expected on stderr here, never a missing pkill:
     # that is checked once below, so this stays quiet.
