@@ -80,7 +80,11 @@ printf '%s' "$EXPORT_PASSWORD"  > "$E2E/secrets/.exportpassword"
 umask 022
 
 echo "==> seeding the vault (personal item + attachment, org item)"
-docker run --rm --network tests_default \
+# Ask for the network rather than assuming "tests_default": the project name is
+# derived from the compose file's directory, and implementations differ.
+NETWORK=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' bwtest-vaultwarden)
+[ -n "$NETWORK" ] || { echo "could not determine the compose network" >&2; exit 1; }
+docker run --rm --network "$NETWORK" \
     -e BW_CLIENTID="$BW_CLIENTID" -e BW_CLIENTSECRET="$BW_CLIENTSECRET" \
     -e PW="$BW_PASSWORD" -e ORG="$E2E_ORG_ID" \
     -e NODE_EXTRA_CA_CERTS=/certs/ca.crt \
