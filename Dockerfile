@@ -30,8 +30,12 @@ RUN apt-get update && apt-get install -y  bash curl unzip jq wget procps && curl
 
 WORKDIR /app
 
-# Installing shoutrrr
-RUN wget $(wget -q -O - https://api.github.com/repos/containrrr/shoutrrr/releases/latest  |  jq -r '.assets[] | select(.name | contains ("linux_amd64")) | .browser_download_url')
+# Installing shoutrrr. Pinned rather than resolved through the GitHub API: that
+# call is unauthenticated, so every build competed for the 60-requests-per-hour
+# quota shared by everything on the same IP. On a CI runner it is usually spent,
+# and because "-q" hid the error the build failed with "wget: missing URL".
+ARG SHOUTRRR_VERSION="0.8.0"
+ADD https://github.com/containrrr/shoutrrr/releases/download/v${SHOUTRRR_VERSION}/shoutrrr_linux_amd64.tar.gz /app/shoutrrr_linux_amd64.tar.gz
 RUN tar -xf shoutrrr_linux_amd64.tar.gz && \
         chmod +x shoutrrr
         
