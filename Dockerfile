@@ -1,47 +1,55 @@
 FROM ubuntu:24.04
 
 LABEL description="Bitwarden exporter docker container"
-LABEL version="1.9" 
+LABEL version="1.9"
 
 # Create a volume for storing vault exporting data
 VOLUME /var/data
+
 # Create a volume for storing attachments files in vault
 VOLUME /var/attachments
 
-# Disable Prompt During Packages Installation
+# Disable prompt during package installation
 ARG DEBIAN_FRONTEND=noninteractive
 
-
-# Update Ubuntu Software repository
-RUN apt-get update && apt-get install -y  bash curl unzip jq wget && curl -1sLf \
-'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
-&& apt-get update && apt-get install -y infisical  \
-&& echo "**** cleanup ****" && \
+# Update Ubuntu software repositories and install dependencies
+RUN apt-get update && \
+    apt-get install -y bash curl unzip jq wget && \
+    curl -1sLf \
+    'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
+    && apt-get update && \
+    apt-get install -y infisical && \
+    echo "**** cleanup ****" && \
     apt-get clean && \
     rm -rf \
         /tmp/* \
         /var/lib/apt/lists/* \
         /var/tmp/*
 
-
-
 WORKDIR /app
 
-# Installing shoutrrr
-RUN wget $(wget -q -O - https://api.github.com/repos/containrrr/shoutrrr/releases/latest  |  jq -r '.assets[] | select(.name | contains ("linux_amd64")) | .browser_download_url')
-RUN tar -xf shoutrrr_linux_amd64.tar.gz && \
-        chmod +x shoutrrr
-        
-# Installing BW_CLI_VERSION version of Bitwarden CLI
+# Install Shoutrrr with support for modern Gotify application tokens (gtfya.*)
+# Using the maintained fork by Nicholas Fedor
+# https://github.com/nicholas-fedor/shoutrrr
+ARG SHOUTRRR_VERSION=0.22.0
+
+RUN wget -q -O /tmp/shoutrrr.tar.gz \
+    "https://github.com/nicholas-fedor/shoutrrr/releases/download/v${SHOUTRRR_VERSION}/shoutrrr_linux_amd64_${SHOUTRRR_VERSION}.tar.gz" \
+    && tar -xzf /tmp/shoutrrr.tar.gz -C /app shoutrrr \
+    && chmod +x /app/shoutrrr \
+    && rm /tmp/shoutrrr.tar.gz
+
+# Install BW_CLI_VERSION version of Bitwarden CLI
 ENV BW_CLI_VERSION="2025.11.0"
+
 ADD https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}/bw-linux-${BW_CLI_VERSION}.zip /tmp/bw.zip
 
-# Copy script
-COPY bw_export.sh /app/bw_export.sh 
+# Copy scripts
+COPY bw_export.sh /app/bw_export.sh
 COPY entrypoint.sh /entrypoint.sh
 COPY root/ /
 
-# Run multiple tasks
+# Configure Bitwarden CLI, permissions, users and directories
 RUN unzip /tmp/bw.zip && \
     chmod +x /app/bw && \
     install /app/bw /usr/local/bin/ && \
@@ -54,12 +62,13 @@ RUN unzip /tmp/bw.zip && \
     mkdir /home/bitwarden && \
     mkdir /var/data && \
     mkdir /var/attachment && \
-    chown -R  bitwarden:bitwarden /home/bitwarden  && \    
-    chown -R  bitwarden:bitwarden /app  && \
-    chown -R  bitwarden:bitwarden /var/data  && \
-    chown -R  bitwarden:bitwarden /var/attachment  && \
+    chown -R bitwarden:bitwarden /home/bitwarden && \
+    chown -R bitwarden:bitwarden /app && \
+    chown -R bitwarden:bitwarden /var/data && \
+    chown -R bitwarden:bitwarden /var/attachment && \
     mkdir -p \
         /app \
         /var/attachment \
         /var/data
-ENTRYPOINT [ "/entrypoint.sh" ]
+
+ENTRYPOINT ["/entrypoint.sh"]
