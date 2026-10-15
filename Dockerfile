@@ -9,15 +9,17 @@ VOLUME /var/data
 # Create a volume for storing attachments files in vault
 VOLUME /var/attachments
 
-# Disable prompt during package installation
+# Disable prompts during package installation
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Update Ubuntu software repositories and install dependencies
+# Update Ubuntu repositories and install dependencies
 RUN apt-get update && \
-    apt-get install -y bash curl unzip jq wget && \
-    curl -1sLf \
-    'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
-    && apt-get update && \
+    apt-get install -y bash curl unzip jq wget ca-certificates && \
+    curl -fsSL \
+        'https://artifacts-cli.infisical.com/setup.deb.sh' \
+        -o /tmp/infisical-setup.sh && \
+    bash /tmp/infisical-setup.sh && \
+    apt-get update && \
     apt-get install -y infisical && \
     echo "**** cleanup ****" && \
     apt-get clean && \
@@ -29,27 +31,26 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Shoutrrr with support for modern Gotify application tokens (gtfya.*)
-# Using the maintained fork by Nicholas Fedor
-# https://github.com/nicholas-fedor/shoutrrr
+# Using Nicholas Fedor's Shoutrrr fork
 ARG SHOUTRRR_VERSION=0.22.0
 
 RUN wget -q -O /tmp/shoutrrr.tar.gz \
-    "https://github.com/nicholas-fedor/shoutrrr/releases/download/v${SHOUTRRR_VERSION}/shoutrrr_linux_amd64_${SHOUTRRR_VERSION}.tar.gz" \
-    && tar -xzf /tmp/shoutrrr.tar.gz -C /app shoutrrr \
-    && chmod +x /app/shoutrrr \
-    && rm /tmp/shoutrrr.tar.gz
+        "https://github.com/nicholas-fedor/shoutrrr/releases/download/v${SHOUTRRR_VERSION}/shoutrrr_linux_amd64_${SHOUTRRR_VERSION}.tar.gz" && \
+    tar -xzf /tmp/shoutrrr.tar.gz -C /app shoutrrr && \
+    chmod +x /app/shoutrrr && \
+    rm /tmp/shoutrrr.tar.gz
 
-# Install BW_CLI_VERSION version of Bitwarden CLI
+# Install Bitwarden CLI
 ENV BW_CLI_VERSION="2025.11.0"
 
 ADD https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}/bw-linux-${BW_CLI_VERSION}.zip /tmp/bw.zip
 
-# Copy scripts
+# Copy scripts and configuration
 COPY bw_export.sh /app/bw_export.sh
 COPY entrypoint.sh /entrypoint.sh
 COPY root/ /
 
-# Configure Bitwarden CLI, permissions, users and directories
+# Configure Bitwarden CLI, permissions, user and directories
 RUN unzip /tmp/bw.zip && \
     chmod +x /app/bw && \
     install /app/bw /usr/local/bin/ && \
