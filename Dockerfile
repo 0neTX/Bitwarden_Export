@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 LABEL description="Bitwarden exporter docker container"
-LABEL version="1.9"
+LABEL version="1.10"
 
 # Create a volume for storing vault exporting data
 VOLUME /var/data

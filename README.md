@@ -17,7 +17,7 @@ This simple bash docker image uses the Bitwarden CLI to perform three backup tas
 ### New Features
 
 - [x] Securize authentication tokens with [Infisical Vault](#safety-infisical)
-- [x] Receive notification in any platform with [Shoutrrr](https://containrrr.dev/shoutrrr/v0.8/services/overview/)
+- [x] Receive notification in any platform with [Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/)
 
 The docker image provides the choice of creating unencrypted export files or password-encrypted export files. Attachments are not encrypted.
 
@@ -110,7 +110,7 @@ You must report the following variables so that the container can authenticate i
 | Variable                          | Description                                                                              |
 |-----------------------------------|------------------------------------------------------------------------------------------|
 | `BW_ORGANIZATIONS_LIST`           | If you want to make a backup of your organizations, set one or more organizations separated by comma. |
-| `NOTIFICATION_URL`                | Shoutrrr notification url [Service overview](https://containrrr.dev/shoutrrr/v0.8/services/overview/) |
+| `NOTIFICATION_URL`                | Shoutrrr notification url [Service overview](https://shoutrrr.nickfedor.com/latest/services/overview/) |
 | `KEEP_LAST_BACKUPS`               | Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted. |
 | `FILE_LOG`                        | Optional: Execution logging file. Please check output path is mapping inside a volume    |
 
@@ -174,6 +174,24 @@ NOTIFICATION_URL=telegram://1009999999:AAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@t
 When export finish correctly, you should receive a notification:
 
 ![alt text](docs/assets/bot-notification-1.png)
+
+### Notification in Gotify
+
+The notification URL is the Gotify host followed by an **application token**:
+
+```bash
+NOTIFICATION_URL=gotify://$GOTIFY_HOST/$GOTIFY_TOKEN
+```
+
+Example:
+
+```bash
+NOTIFICATION_URL=gotify://gotify.example.com/gtfya.AbCdEf0123456789AbCdEf0123456789AbCdEf01234
+```
+
+If Gotify runs under a subpath, add it before the token (`gotify://example.com/gotify/$GOTIFY_TOKEN`). If it is served over plain HTTP instead of HTTPS, append `?disabletls=yes`.
+
+Both token formats are accepted: the legacy one from Gotify below 3.0.0 (15 characters starting with `A`) and the one issued by Gotify 3.0.0 and later (`gtfya.` prefix, around 50 characters). Support for the newer format is why this image builds Shoutrrr from the [nicholas-fedor fork](https://github.com/nicholas-fedor/shoutrrr): the original `containrrr` project stopped at v0.8.0, which rejects any token that is not exactly 15 characters starting with `A`.
 
 ## Run in Unraid
 
