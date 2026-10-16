@@ -1,7 +1,25 @@
 FROM ubuntu:24.04
 
+# The image's own version. ARG so a release build can stamp it
+# (--build-arg IMAGE_VERSION=...), with the pinned value as the default, the
+# same way BW_CLI_VERSION and SHOUTRRR_VERSION do below.
+ARG IMAGE_VERSION="1.10"
+
+# Both sets of keys on purpose. "description" and "version" are what this image
+# has always published. The org.opencontainers.image.* ones are the standard
+# keys that Portainer and other tools actually read, and ubuntu:24.04 sets
+# org.opencontainers.image.version=24.04 on itself. Labels are inherited, so
+# without these the image reports the base distro's version as its own: the
+# published 1.9 image announces 24.04, with ref.name=ubuntu beside it.
 LABEL description="Bitwarden exporter docker container"
-LABEL version="1.10"
+LABEL version="${IMAGE_VERSION}"
+LABEL org.opencontainers.image.title="bw-export"
+LABEL org.opencontainers.image.description="Bitwarden exporter docker container"
+LABEL org.opencontainers.image.version="${IMAGE_VERSION}"
+LABEL org.opencontainers.image.ref.name="bw-export"
+LABEL org.opencontainers.image.source="https://github.com/0neTX/Bitwarden_Export"
+LABEL org.opencontainers.image.url="https://github.com/0neTX/Bitwarden_Export"
+LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 
 # Create a volume for storing vault exporting data
 VOLUME /var/data
