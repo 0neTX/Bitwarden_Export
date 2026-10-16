@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 # The image's own version. ARG so a release build can stamp it
 # (--build-arg IMAGE_VERSION=...), with the pinned value as the default, the
 # same way BW_CLI_VERSION and SHOUTRRR_VERSION do below.
-ARG IMAGE_VERSION="1.10"
+ARG IMAGE_VERSION="1.12"
 
 # Both sets of keys on purpose. "description" and "version" are what this image
 # has always published. The org.opencontainers.image.* ones are the standard
