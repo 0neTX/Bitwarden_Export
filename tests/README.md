@@ -4,7 +4,7 @@ Two layers:
 
 - **`run_tests.sh`** — 80 assertions against `bw_export.sh` using a stateful mock
   of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers.
-- **`run_ping_tests.sh`** — 32 assertions against the `PING_URL` helpers in
+- **`run_ping_tests.sh`** — 33 assertions against the `PING_URL` helpers in
   `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
   three-line stub for `curl`.
 - **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.2 and a
@@ -44,10 +44,11 @@ delete a complete backup to make room for an incomplete one.
 bash tests/run_ping_tests.sh
 ```
 
-Expect `PASS=32 FAIL=0`. It covers the URL building (both placeholders, the
+Expect `PASS=33 FAIL=0`. It covers the URL building (both placeholders, the
 appended path segment when there is none, the trailing slash, and the start ping
 that `{status}` omits) and `send_ping`'s two guarantees: it logs the event
-without the URL, because that carries the monitor's token, and it returns 0 even
+without the URL, because that carries the monitor's token, even when the shell
+is tracing with `set -x` as `send_notification` leaves it, and it returns 0 even
 when `curl` fails.
 
 The last one is the guard for #22. `entrypoint.sh` pings from an `EXIT` trap, and
@@ -57,14 +58,14 @@ export's.
 
 The library is sourced through `$LIB`, so the suite can be pointed at another
 implementation as a control. The obvious wrong one — append the event and trust
-`curl` — fails 29 of the 32:
+`curl` — fails 30 of the 33:
 
 ```bash
 cat > /tmp/naive.sh <<'EOF'
 build_ping_url() { printf '%s\n' "$1/$2"; }
 send_ping() { curl -fsS --retry 3 "${PING_URL}/$1"; }
 EOF
-LIB=/tmp/naive.sh bash tests/run_ping_tests.sh   # PASS=3 FAIL=29
+LIB=/tmp/naive.sh bash tests/run_ping_tests.sh   # PASS=3 FAIL=30
 ```
 
 ## End-to-end suite

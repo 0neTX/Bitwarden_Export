@@ -65,14 +65,15 @@ build_ping_url() {
 #   $2  the export's exit code
 # shellcheck disable=SC2329  # called from entrypoint.sh, not from this file
 send_ping() {
+    # The URL carries the monitor's token, and send_notification leaves "set -x"
+    # on in this shell, which would trace it into the container log. This has to
+    # come before build_ping_url: its arguments and every line inside it carry
+    # the URL too. The event is worth logging; the URL is not.
+    set +x
     local url
     url="$(build_ping_url "${PING_URL:-}" "$1" "${2:-0}")"
     [[ -z "$url" ]] && return 0
 
-    # The URL carries the monitor's token, and send_notification leaves "set -x"
-    # on in this shell, which would trace it into the container log. The event is
-    # worth logging; the URL is not.
-    set +x
     echo -e "\n${Cyan:-}Monitoring ping: $1 "
 
     # No -S, and the warning below names no URL: curl reports some failures with

@@ -106,6 +106,13 @@ eq "warned without the URL" "0" \
 rc=$?
 eq "exit code stays the export's" "3" "$rc"
 
+# entrypoint.sh pings from its EXIT trap after send_notification has run, and
+# that leaves "set -x" on: the URL must not reach the trace either.
+: > "$CURL_LOG"
+( export PATH="$SBX/bin:$PATH" PING_URL="$HC"
+  set -x; send_ping failure 1 ) > "$SBX/out" 2>&1
+eq "URL kept out of a set -x trace" "0" "$(grep -c "0d1e2f" "$SBX/out")"
+
 echo "=== P9: unset PING_URL does nothing at all ==="
 : > "$CURL_LOG"
 ( export PATH="$SBX/bin:$PATH"; unset PING_URL
