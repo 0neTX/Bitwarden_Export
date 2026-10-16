@@ -262,6 +262,51 @@ When the variable `KEEP_LAST_BACKUPS` is set, the container will sort the folder
 
 ![Keep Last Sample](docs/assets/keep-last.png)
 
+## Upgrading: attachments path
+
+Earlier versions of this README and of `docker-compose.yml` mounted the
+attachments folder on `/var/attachment`, but the image saves attachments to
+`/var/attachments`. With that mount the export succeeded and **the attachments
+never reached the host folder**: they went to an anonymous Docker volume
+instead. Unraid's template already uses `/var/attachments` and is not affected.
+
+**What changes for you**
+
+- **You mount `/var/attachment` and do not set `ATTACHMENTS_PATH`:** nothing
+  breaks. The image notices the old mount, saves the attachments there, and logs
+  a warning. Change the mount to `/var/attachments` when convenient:
+
+  ```yaml
+  volumes:
+    - ./export:/var/data
+    - ./export:/var/attachments
+  ```
+
+- **You mount `/var/attachments`, or set `ATTACHMENTS_PATH`:** nothing changes.
+  That includes mounting both paths to different folders: `/var/attachments`
+  keeps being used.
+- **You set `ATTACHMENTS_PATH=/var/attachment` without mounting it:** the run
+  now fails with `Could not find the folder in which to save the attachments`.
+  Before, the files were written inside the container and lost with it. Mount a
+  folder there, or drop the variable.
+
+**Recovering the attachments saved so far**
+
+They are in the anonymous volume of your existing container, as long as it has
+not been removed with `docker rm -v` or run with `--rm` (`docker compose`
+keeps anonymous volumes when it recreates a container). Copy them out before
+recreating it, replacing `bw-export` with your container's name and `./export`
+with your host folder:
+
+```bash
+docker run --rm --volumes-from bw-export -v ./export:/restore \
+    --entrypoint cp 0netx/bw-export:latest -a /var/attachments/. /restore/
+```
+
+Each run's attachments land in the same dated folder as its vault export. Under
+Docker the copied files belong to root; add `--user "$(id -u):$(id -g)"` if you
+need them to be yours (on SELinux hosts, also `:z` on the `/restore` mount).
+
 # Developers only -  How to build the image
 
 ## Clone repo and build docker image
