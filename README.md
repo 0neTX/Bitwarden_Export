@@ -55,7 +55,7 @@ The following are created by the docker image:
 If you prefer to run it manually or just once, run the following command:
 
 ```bash
-docker run --name bw-export -v ./export/data:/var/data -v ./export/attachment:/var/attachment -e "BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>" -e "BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>" -e "BW_PASSWORD=<BITWARDEN PASSWORD>" 0netx/bw-export:latest
+docker run --name bw-export -v ./export/data:/var/data -v ./export/attachments:/var/attachments -e "BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>" -e "BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>" -e "BW_PASSWORD=<BITWARDEN PASSWORD>" 0netx/bw-export:latest
 ```
 
 ### Run container in any plattorm with docker compose:
@@ -76,7 +76,7 @@ docker run --name bw-export -v ./export/data:/var/data -v ./export/attachment:/v
         # Optional: Own Vaultwarden/Bitarden selfhosted server
         #- BW_URL_SERVER=<YOUR VAULTWARDER URL SERVER>
         - OUTPUT_PATH=<Output path i.e. /var/data/ >
-        - ATTACHMENTS_PATH=<attachment path i.e. /var/attachment/ >
+        - ATTACHMENTS_PATH=<attachment path i.e. /var/attachments/ >
         - EXPORT_PASSWORD=<Export password. Export will be encrypted with this password>
         - BW_ORGANIZATIONS_LIST=<Organization list id, comma separated>
         # Optional: Map the container's internal user to a user on the host machine
@@ -228,6 +228,25 @@ It is most likely that you will use the `id` of yourself, which can be obtained 
 ```shell
 id $user
 ```
+
+### Rootless Podman
+
+Rootless Podman maps the container's uids onto your subordinate uid range, so
+`PUID=1000` inside the container is **not** uid 1000 on the host: exports land
+owned by an unknown user, or cannot be written at all. Add the
+[`compose.podman.yml`](compose.podman.yml) override, which uses `keep-id` so your
+uid means the same inside and outside the container:
+
+```shell
+podman compose -f docker-compose.yml -f compose.podman.yml up
+```
+
+With it, `PUID`/`PGID` behave exactly as under Docker. Without `PUID`, rootless
+Podman already writes the files as you, since the container's root is your user.
+The override is Podman only: Docker rejects `keep-id`.
+
+On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g.
+`./export:/var/data:z`, or the container cannot read them.
 
 ## KEEP_LAST_BACKUPS Variable
 
