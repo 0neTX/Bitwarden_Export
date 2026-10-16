@@ -15,7 +15,8 @@ pass=0; fail=0
 # Sets up a fresh sandbox; $1 = a snippet that seeds the CLI state file.
 setup() {
   unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR \
-        BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS
+        BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS \
+        BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST BW_FAIL_LIST
   rm -rf "$SP/sbx"; mkdir -p "$SP/sbx/out" "$SP/sbx/att"
   export BW_STATE="$SP/sbx/state" BW_CALLLOG="$SP/sbx/calls"
   : > "$BW_CALLLOG"
@@ -37,7 +38,7 @@ check() { # name, condition-result(0/1), detail
   else echo "  FAIL  $1  -- $3"; fail=$((fail+1)); fi
 }
 state_is_clean() { grep -q '^auth=0' "$BW_STATE"; }
-exported()       { compgen -G "$SP/sbx/out/*/export.json" >/dev/null; }
+exported()       { compgen -G "$SP/sbx/out/*/export-personal.json" >/dev/null; }
 
 echo "=== T1: cold start (no cached state) ==="
 setup ""
@@ -320,6 +321,67 @@ check "oldest was deleted" "$([ ! -d "$SP/sbx/out/20200101000000-bw-export" ]; e
 check "only KEEP_LAST_BACKUPS remain" "$([ "$(find "$SP/sbx/out" -maxdepth 1 -name '*-bw-export' -type d | wc -l)" = 1 ]; echo $?)" "$(ls "$SP/sbx/out")"
 unset BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS
 
+echo "=== T25: a personal vault export that fails must not pass as a good backup ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_FAIL_EXPORT=personal BW_ORGANIZATIONS_LIST=o1
+rc=$(run)
+check "exit 1 (incomplete backup)" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "names the failed export" "$(grep -q 'ERROR: Failed to export the personal vault' "$SP/sbx/output"; echo $?)" "$(tail -6 "$SP/sbx/output")"
+check "counts it" "$(grep -q 'but 1 vault export(s) failed' "$SP/sbx/output"; echo $?)" "$(tail -4 "$SP/sbx/output")"
+check "says the backup is incomplete" "$(grep -q 'This backup is incomplete' "$SP/sbx/output"; echo $?)" "no final warning"
+check "no 'Vault export complete'" "$(! grep -q 'Vault export complete' "$SP/sbx/output"; echo $?)" "claimed completion"
+check "no 'Have a good day'" "$(! grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "reported success anyway"
+check "the organization was still exported" "$(compgen -G "$SP/sbx/out/*/export-o1.json" >/dev/null; echo $?)" "$(find "$SP/sbx/out" -type f)"
+check "session still closed" "$(state_is_clean; echo $?)" "$(cat "$BW_STATE")"
+
+echo "=== T26: one organization failing is counted, the others still exported ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_FAIL_EXPORT=o2 BW_ORGANIZATIONS_LIST=o1,o2,o3
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "names the organization" "$(grep -q 'Failed to export the organization vault o2' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
+check "counts exactly one" "$(grep -q 'but 1 vault export(s) failed' "$SP/sbx/output"; echo $?)" "$(grep -o '[0-9]* vault export(s) failed' "$SP/sbx/output")"
+check "all three were attempted" "$([ "$(grep -c '^bw export --organizationid' "$BW_CALLLOG")" = 3 ]; echo $?)" "$(grep '^bw export' "$BW_CALLLOG")"
+check "the others were saved" "$(compgen -G "$SP/sbx/out/*/export-o1.json" >/dev/null && compgen -G "$SP/sbx/out/*/export-o3.json" >/dev/null && exported; echo $?)" "$(find "$SP/sbx/out" -type f)"
+
+echo "=== T27: a failed export must not rotate a complete backup out ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_FAIL_EXPORT=personal KEEP_LAST_BACKUPS=1
+mkdir -p "$SP/sbx/out/20200101000000-bw-export" "$SP/sbx/out/20200102000000-bw-export"
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says it is keeping them" "$(grep -q 'keeping all previous backups' "$SP/sbx/output"; echo $?)" "$(tail -5 "$SP/sbx/output")"
+check "old backups untouched" "$([ -d "$SP/sbx/out/20200101000000-bw-export" ] && [ -d "$SP/sbx/out/20200102000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
+check "did not run the cleanup" "$(! grep -q 'Starting cleaning previous backups' "$SP/sbx/output"; echo $?)" "pruned anyway"
+
+echo "=== T28: exports with organizations all succeeding must still exit 0 ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ORGANIZATIONS_LIST=o1,o2
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "reports completion" "$(grep -q 'Vault export complete' "$SP/sbx/output" && grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "$(tail -4 "$SP/sbx/output")"
+check "no spurious failure" "$(! grep -q 'export(s) failed\|Failed to export' "$SP/sbx/output"; echo $?)" "$(grep -i fail "$SP/sbx/output")"
+check "all three files written" "$([ "$(find "$SP/sbx/out" -name 'export-*.json' | wc -l)" = 3 ]; echo $?)" "$(find "$SP/sbx/out" -type f)"
+unset BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST KEEP_LAST_BACKUPS
+
+echo "=== T29: an items listing that fails is not 'no attachments' ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_FAIL_LIST=items
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says it could not list" "$(grep -q 'Could not list the vault items' "$SP/sbx/output"; echo $?)" "$(grep -i 'attach' "$SP/sbx/output")"
+check "no 'No attachments exist'" "$(! grep -q 'No attachments exist' "$SP/sbx/output"; echo $?)" "claimed the vault has none"
+check "the vault itself was still exported" "$(exported; echo $?)" "$(find "$SP/sbx/out" -type f)"
+
+echo "=== T30: an organizations listing that fails is not 'no organizations' ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_FAIL_LIST=organizations
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says it could not list" "$(grep -q 'Could not list the organizations' "$SP/sbx/output"; echo $?)" "$(grep -i 'organi' "$SP/sbx/output")"
+check "no 'No organizational vault exists'" "$(! grep -q 'No organizational vault exists' "$SP/sbx/output"; echo $?)" "claimed there are none"
+check "no 'Have a good day'" "$(! grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "reported success anyway"
+unset BW_FAIL_LIST
 echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
 setup ""
 # The legacy /var/attachment fallback hinges on this, and rootful Docker cannot
