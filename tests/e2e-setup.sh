@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the end-to-end environment for issue #21 from nothing:
-# TLS material, a Vaultwarden 1.37.2, a registered account with an API key, an
+# TLS material, a Vaultwarden 1.37.4, a registered account with an API key, an
 # organization, one personal item with an attachment and one org item.
 #
 #   bash tests/e2e-setup.sh
@@ -15,7 +15,9 @@ COMPOSE=(docker compose -f "$PWD/compose.test.yml")
 
 mkdir -p "$E2E"/{data,att,secrets,vw,certs,nginx}
 
-if [[ ! -f "$E2E/certs/vw.crt" ]]; then
+# Regenerated when missing or expired: they only last 30 days, and an expired
+# one fails the export at login with nothing in the log pointing at TLS.
+if [[ ! -f "$E2E/certs/vw.crt" ]] || ! openssl x509 -checkend 0 -noout -in "$E2E/certs/vw.crt" >/dev/null 2>&1; then
     echo "==> generating throwaway CA and vw.test certificate"
     # The Bitwarden CLI refuses plain-HTTP servers, so Vaultwarden needs TLS.
     openssl req -x509 -newkey rsa:2048 -nodes -keyout "$E2E/certs/ca.key" \
@@ -51,7 +53,7 @@ NGINX
 echo "==> starting vaultwarden + TLS proxy"
 # Pulled up front: under podman the compose provider can only pull through the
 # API socket, which is not always up.
-docker pull -q docker.io/vaultwarden/server:1.37.2 >/dev/null
+docker pull -q docker.io/vaultwarden/server:1.37.4 >/dev/null
 docker pull -q docker.io/library/nginx:alpine >/dev/null
 "${COMPOSE[@]}" up -d vaultwarden vw-tls >/dev/null
 for _ in $(seq 1 60); do
