@@ -76,12 +76,20 @@ send_ping() {
     echo -e "\n${Cyan:-}Monitoring ping: $1 "
 
     # No -S, and the warning below names no URL: curl reports some failures with
-    # the address attached, which would put the token in the log. --max-time
-    # matters as much as --retry: the result ping runs after a backup that may
-    # have succeeded, and an unreachable monitor must not hold the container
-    # open. The failure is swallowed on purpose, so a monitoring outage cannot
-    # turn a good backup into a bad exit code.
-    if ! curl -fs -o /dev/null --max-time 10 --retry 3 "$url"; then
+    # the address attached, which would put the token in the log.
+    #
+    # The timeouts matter as much as the retries, because the result ping runs
+    # after a backup that may have succeeded and must not hold the container
+    # open. A monitor that refuses the connection or does not resolve fails in
+    # under a second; one that drops the packets costs the full budget, and
+    # --max-time alone does not bound it, since each retry gets its own. Measured
+    # against a blackholed address: "--max-time 10 --retry 3" takes 47s, and this
+    # takes 11s. Two pings per run, so that is the figure that matters.
+    #
+    # The failure is swallowed on purpose: a monitoring outage must not turn a
+    # good backup into a bad exit code.
+    if ! curl -fs -o /dev/null \
+            --max-time 5 --retry 2 --retry-max-time 10 "$url"; then
         echo -e "${Yellow:-}Warning: monitoring ping ($1) failed; continuing."
     fi
     return 0

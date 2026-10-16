@@ -235,9 +235,12 @@ A trailing slash is removed before anything is appended, so
 `https://hc-ping.com/<uuid>` and `https://hc-ping.com/<uuid>/` behave the same.
 
 A failed ping never fails the backup. It is reported as a warning and the
-container still exits with the export's own status code. Each ping is given ten
-seconds and three attempts, so an unreachable monitor cannot hold the container
-open after an export that worked.
+container still exits with the export's own status code.
+
+An unreachable monitor also cannot hold the container open for long. A refused
+connection or a hostname that does not resolve fails in about a second; a host
+that silently drops the packets costs at most eleven, and there are two pings in
+a run, so roughly twenty seconds in the worst case.
 
 ## Run in Unraid
 

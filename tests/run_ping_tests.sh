@@ -84,7 +84,9 @@ eq "called once"      "1"         "$(wc -l < "$CURL_LOG")"
 eq "pinged the right URL" "0" \
    "$(grep -cq -- "$HC/0" "$CURL_LOG"; echo $?)"
 eq "bounded and retried"  "0" \
-   "$(grep -q -- "--max-time 10" "$CURL_LOG" && grep -q -- "--retry 3" "$CURL_LOG"; echo $?)"
+   "$(grep -q -- "--max-time 5" "$CURL_LOG" \
+      && grep -q -- "--retry 2" "$CURL_LOG" \
+      && grep -q -- "--retry-max-time 10" "$CURL_LOG"; echo $?)"
 eq "logged the event, not the URL" "0" \
    "$(grep -q "Monitoring ping: success" "$SBX/out" && ! grep -q "0d1e2f" "$SBX/out"; echo $?)"
 
