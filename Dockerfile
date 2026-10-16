@@ -16,10 +16,25 @@ LABEL version="${IMAGE_VERSION}"
 LABEL org.opencontainers.image.title="bw-export"
 LABEL org.opencontainers.image.description="Bitwarden exporter docker container"
 LABEL org.opencontainers.image.version="${IMAGE_VERSION}"
-LABEL org.opencontainers.image.ref.name="bw-export"
 LABEL org.opencontainers.image.source="https://github.com/0neTX/Bitwarden_Export"
 LABEL org.opencontainers.image.url="https://github.com/0neTX/Bitwarden_Export"
+LABEL org.opencontainers.image.documentation="https://github.com/0neTX/Bitwarden_Export#readme"
+LABEL org.opencontainers.image.vendor="0neTX"
+LABEL org.opencontainers.image.authors="0neTX (https://github.com/0neTX)"
+# SPDX expression. GPL-3.0-only is the current identifier; plain GPL-3.0 is
+# deprecated in the SPDX list.
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
+# Fully qualified, with no assumed default registry, as the spec asks. It has to
+# agree with the FROM above, so CI checks that it does.
+LABEL org.opencontainers.image.base.name="docker.io/library/ubuntu:24.04"
+# Set deliberately, though the spec reserves ref.name for descriptors in an image
+# layout rather than for an image's own labels. Left unset it comes back
+# inherited: :latest reports ref.name=ubuntu to this day.
+LABEL org.opencontainers.image.ref.name="bw-export"
+
+# Not declared here on purpose: created, revision and base.digest are build-time
+# facts, and a hardcoded value for any of them would simply be false. They need
+# to be stamped by the workflow.
 
 # Create a volume for storing vault exporting data
 VOLUME /var/data

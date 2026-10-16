@@ -79,3 +79,16 @@ jobs:
             echo "::error::ref.name is still inherited from the base image"
             exit 1
           fi
+
+          # base.name is written out in full, so it can fall out of step with a
+          # bumped FROM. That is the same drift this whole change is about.
+          base=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.base.name"}}' bw-export:ci)
+          from=$(sed -n 's/^FROM \(.*\)$/\1/p' Dockerfile | head -1)
+          echo "org.opencontainers.image.base.name = $base (FROM $from)"
+          case "$base" in
+            "$from"|*"/$from") ;;
+            *)
+              echo "::error::base.name is \"$base\" but the Dockerfile builds FROM \"$from\""
+              exit 1
+              ;;
+          esac
