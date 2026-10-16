@@ -28,4 +28,8 @@ User gid:    $(id -g bitwarden)
 "
 chown -R  bitwarden:bitwarden /app
 chown -R  bitwarden:bitwarden /var/data
-chown -R  bitwarden:bitwarden /var/attachment
+chown -R  bitwarden:bitwarden /var/attachments
+# Legacy mount point from the old README/compose; see bw_export.sh.
+if mountpoint -q /var/attachment 2>/dev/null; then
+    chown -R  bitwarden:bitwarden /var/attachment
+fi

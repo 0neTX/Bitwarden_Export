@@ -116,14 +116,14 @@ RUN unzip /tmp/bw.zip && \
     usermod -G users bitwarden && \
     mkdir -p /home/bitwarden && \
     mkdir -p /var/data && \
-    mkdir -p /var/attachment && \
+    mkdir -p /var/attachments && \
     chown -R bitwarden:bitwarden /home/bitwarden && \
     chown -R bitwarden:bitwarden /app && \
     chown -R bitwarden:bitwarden /var/data && \
-    chown -R bitwarden:bitwarden /var/attachment && \
+    chown -R bitwarden:bitwarden /var/attachments && \
     mkdir -p \
         /app \
-        /var/attachment \
+        /var/attachments \
         /var/data
 
 ENTRYPOINT ["/entrypoint.sh"]

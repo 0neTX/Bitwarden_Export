@@ -382,6 +382,31 @@ check "says it could not list" "$(grep -q 'Could not list the organizations' "$S
 check "no 'No organizational vault exists'" "$(! grep -q 'No organizational vault exists' "$SP/sbx/output"; echo $?)" "claimed there are none"
 check "no 'Have a good day'" "$(! grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "reported success anyway"
 unset BW_FAIL_LIST
+echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
+setup ""
+# The legacy /var/attachment fallback hinges on this, and rootful Docker cannot
+# be run here, so its mountinfo format is checked from fixture lines. The
+# function is pulled out of the script, since sourcing the script would run it.
+eval "$(sed -n '/^is_anonymous_volume() {/,/^}/p' "$SCRIPT")"
+id=$(printf '%064d' 0)
+cat > "$SP/sbx/mountinfo" <<EOF
+101 90 0:52 /var/lib/docker/volumes/$id/_data /docker-anon rw - ext4 /dev/sda1 rw
+102 90 0:52 /lib/docker/volumes/$id/_data /docker-anon-sepvar rw - xfs /dev/sdb1 rw
+103 90 0:52 /home/u/.local/share/containers/storage/volumes/$id/_data /podman-anon rw - btrfs /dev/sda2 rw
+104 90 0:52 /var/lib/docker/volumes/my-attachments/_data /named rw - ext4 /dev/sda1 rw
+105 90 0:52 /srv/backups/attachments /bind rw - ext4 /dev/sda1 rw
+106 90 0:52 /srv/volumes/$id/_data/sub /bind-lookalike rw - ext4 /dev/sda1 rw
+EOF
+if ! declare -F is_anonymous_volume >/dev/null; then
+  check "the script defines is_anonymous_volume" 1 "not found in $SCRIPT"
+else
+  for m in /docker-anon /docker-anon-sepvar /podman-anon; do
+    check "$m is anonymous" "$(is_anonymous_volume "$m" "$SP/sbx/mountinfo"; echo $?)" "not detected"
+  done
+  for m in /named /bind /bind-lookalike /not-mounted; do
+    check "$m is not anonymous" "$(! is_anonymous_volume "$m" "$SP/sbx/mountinfo"; echo $?)" "misdetected"
+  done
+fi
 
 echo
 echo "PASS=$pass FAIL=$fail"

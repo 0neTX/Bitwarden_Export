@@ -55,7 +55,7 @@ The following are created by the docker image:
 If you prefer to run it manually or just once, run the following command:
 
 ```bash
-docker run --name bw-export -v ./export/data:/var/data -v ./export/attachment:/var/attachment -e "BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>" -e "BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>" -e "BW_PASSWORD=<BITWARDEN PASSWORD>" 0netx/bw-export:latest
+docker run --name bw-export -v ./export/data:/var/data -v ./export/attachments:/var/attachments -e "BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>" -e "BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>" -e "BW_PASSWORD=<BITWARDEN PASSWORD>" 0netx/bw-export:latest
 ```
 
 ### Run container in any plattorm with docker compose:
@@ -76,7 +76,7 @@ docker run --name bw-export -v ./export/data:/var/data -v ./export/attachment:/v
         # Optional: Own Vaultwarden/Bitarden selfhosted server
         #- BW_URL_SERVER=<YOUR VAULTWARDER URL SERVER>
         - OUTPUT_PATH=<Output path i.e. /var/data/ >
-        - ATTACHMENTS_PATH=<attachment path i.e. /var/attachment/ >
+        - ATTACHMENTS_PATH=<attachment path i.e. /var/attachments/ >
         - EXPORT_PASSWORD=<Export password. Export will be encrypted with this password>
         - BW_ORGANIZATIONS_LIST=<Organization list id, comma separated>
         # Optional: Map the container's internal user to a user on the host machine
@@ -278,6 +278,25 @@ It is most likely that you will use the `id` of yourself, which can be obtained 
 id $user
 ```
 
+### Rootless Podman
+
+Rootless Podman maps the container's uids onto your subordinate uid range, so
+`PUID=1000` inside the container is **not** uid 1000 on the host: exports land
+owned by an unknown user, or cannot be written at all. Add the
+[`compose.podman.yml`](compose.podman.yml) override, which uses `keep-id` so your
+uid means the same inside and outside the container:
+
+```shell
+podman compose -f docker-compose.yml -f compose.podman.yml up
+```
+
+With it, `PUID`/`PGID` behave exactly as under Docker. Without `PUID`, rootless
+Podman already writes the files as you, since the container's root is your user.
+The override is Podman only: Docker rejects `keep-id`.
+
+On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g.
+`./export:/var/data:z`, or the container cannot read them.
+
 ## KEEP_LAST_BACKUPS Variable
 
 Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted.
@@ -291,6 +310,51 @@ Each export is saved in the output folder with the template `<DateTime>-bw-expor
 When the variable `KEEP_LAST_BACKUPS` is set, the container will sort the folders and delete the oldest ones while keeping the number of folders indicated by the variable.
 
 ![Keep Last Sample](docs/assets/keep-last.png)
+
+## Upgrading: attachments path
+
+Earlier versions of this README and of `docker-compose.yml` mounted the
+attachments folder on `/var/attachment`, but the image saves attachments to
+`/var/attachments`. With that mount the export succeeded and **the attachments
+never reached the host folder**: they went to an anonymous Docker volume
+instead. Unraid's template already uses `/var/attachments` and is not affected.
+
+**What changes for you**
+
+- **You mount `/var/attachment` and do not set `ATTACHMENTS_PATH`:** nothing
+  breaks. The image notices the old mount, saves the attachments there, and logs
+  a warning. Change the mount to `/var/attachments` when convenient:
+
+  ```yaml
+  volumes:
+    - ./export:/var/data
+    - ./export:/var/attachments
+  ```
+
+- **You mount `/var/attachments`, or set `ATTACHMENTS_PATH`:** nothing changes.
+  That includes mounting both paths to different folders: `/var/attachments`
+  keeps being used.
+- **You set `ATTACHMENTS_PATH=/var/attachment` without mounting it:** the run
+  now fails with `Could not find the folder in which to save the attachments`.
+  Before, the files were written inside the container and lost with it. Mount a
+  folder there, or drop the variable.
+
+**Recovering the attachments saved so far**
+
+They are in the anonymous volume of your existing container, as long as it has
+not been removed with `docker rm -v` or run with `--rm` (`docker compose`
+keeps anonymous volumes when it recreates a container). Copy them out before
+recreating it, replacing `bw-export` with your container's name and `./export`
+with your host folder:
+
+```bash
+docker run --rm --volumes-from bw-export -v ./export:/restore \
+    --entrypoint cp 0netx/bw-export:latest -a /var/attachments/. /restore/
+```
+
+Each run's attachments land in the same dated folder as its vault export. Under
+Docker the copied files belong to root; add `--user "$(id -u):$(id -g)"` if you
+need them to be yours (on SELinux hosts, also `:z` on the `/restore` mount).
 
 # Developers only -  How to build the image
 

@@ -27,13 +27,13 @@ jobs:
             tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
             tests/e2e-setup.sh tests/e2e-verify.sh
 
-      # 109 assertions against a stateful mock of the Bitwarden CLI. This covers
+      # 116 assertions against a stateful mock of the Bitwarden CLI. This covers
       # the script's logic only; it says nothing about the real CLI, which the
       # end-to-end suite in tests/e2e-setup.sh exercises.
       - name: unit suite
         run: SCRIPT="$PWD/bw_export.sh" bash tests/run_tests.sh
 
-      # 32 assertions against the PING_URL helpers. Separate from the suite
+      # 33 assertions against the PING_URL helpers. Separate from the suite
       # above because it drives a different unit: the URL building that
       # entrypoint.sh sources, which cannot be reached through bw_export.sh.
       - name: ping suite
