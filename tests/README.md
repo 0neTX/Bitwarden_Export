@@ -4,6 +4,9 @@ Two layers:
 
 - **`run_tests.sh`** — 80 assertions against `bw_export.sh` using a stateful mock
   of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers.
+- **`run_ping_tests.sh`** — 32 assertions against the `PING_URL` helpers in
+  `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
+  three-line stub for `curl`.
 - **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.2 and a
   bw-export image built from the repo `Dockerfile`, used to validate issue #21
   end to end.
@@ -34,6 +37,35 @@ delete a complete backup to make room for an incomplete one.
 > `mock/bw` must be executable. On a filesystem that ignores the exec bit
 > (NTFS/exFAT via FUSE, some network mounts) copy `tests/` to a native Linux
 > filesystem first, or every test fails with "permission denied".
+
+## Ping suite
+
+```bash
+bash tests/run_ping_tests.sh
+```
+
+Expect `PASS=32 FAIL=0`. It covers the URL building (both placeholders, the
+appended path segment when there is none, the trailing slash, and the start ping
+that `{status}` omits) and `send_ping`'s two guarantees: it logs the event
+without the URL, because that carries the monitor's token, and it returns 0 even
+when `curl` fails.
+
+The last one is the guard for #22. `entrypoint.sh` pings from an `EXIT` trap, and
+`send_notification` leaves `set -e` on in that shell, so a `curl` failure allowed
+to escape would make the container exit with curl's status instead of the
+export's.
+
+The library is sourced through `$LIB`, so the suite can be pointed at another
+implementation as a control. The obvious wrong one — append the event and trust
+`curl` — fails 29 of the 32:
+
+```bash
+cat > /tmp/naive.sh <<'EOF'
+build_ping_url() { printf '%s\n' "$1/$2"; }
+send_ping() { curl -fsS --retry 3 "${PING_URL}/$1"; }
+EOF
+LIB=/tmp/naive.sh bash tests/run_ping_tests.sh   # PASS=3 FAIL=29
+```
 
 ## End-to-end suite
 
@@ -128,6 +160,24 @@ detected`, because nothing was left behind.
 The cleanup only runs once the `bw` command in flight returns, so on a large
 vault give `docker stop` more than its default 10 seconds (`-t`, or
 `stop_grace_period` in compose).
+
+**It pings the monitor.** The URL building is unit tested; that the container
+really reaches out is not. Point it at a listener that records what it is asked
+for:
+
+```bash
+python3 -m http.server 8111 &
+
+docker run --rm --network host \
+    -e PING_URL=http://127.0.0.1:8111/ping \
+    -e BW_CLIENTID=bogus -e BW_CLIENTSECRET=bogus -e BW_PASSWORD=bogus \
+    localhost/bw-export:local
+```
+
+The listener logs `GET /ping/start` and then `GET /ping/1`, in that order. It
+answers 404 to both, which is useful rather than a problem: the container must
+log `Warning: monitoring ping (...) failed; continuing.` and still exit 1, not 0
+and not 22. That is the non-fatal guarantee, seen from outside.
 
 ### Teardown
 

@@ -113,6 +113,7 @@ You must report the following variables so that the container can authenticate i
 | `NOTIFICATION_URL`                | Shoutrrr notification url [Service overview](https://shoutrrr.nickfedor.com/latest/services/overview/) |
 | `KEEP_LAST_BACKUPS`               | Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted. |
 | `FILE_LOG`                        | Optional: Execution logging file. Please check output path is mapping inside a volume    |
+| `PING_URL`                        | Optional: monitoring endpoint pinged when the export starts and when it finishes, carrying the outcome. For healthchecks, uptime-kuma or any dead man's switch. See [Monitoring](#monitoring-healthchecks-uptime-kuma) |
 
 ### Safety
 
@@ -192,6 +193,51 @@ NOTIFICATION_URL=gotify://gotify.example.com/gtfya.AbCdEf0123456789AbCdEf0123456
 If Gotify runs under a subpath, add it before the token (`gotify://example.com/gotify/$GOTIFY_TOKEN`). If it is served over plain HTTP instead of HTTPS, append `?disabletls=yes`.
 
 Both token formats are accepted: the legacy one from Gotify below 3.0.0 (15 characters starting with `A`) and the one issued by Gotify 3.0.0 and later (`gtfya.` prefix, around 50 characters). Support for the newer format is why this image builds Shoutrrr from the [nicholas-fedor fork](https://github.com/nicholas-fedor/shoutrrr): the original `containrrr` project stopped at v0.8.0, which rejects any token that is not exactly 15 characters starting with `A`.
+
+### Monitoring (healthchecks, uptime-kuma)
+
+`NOTIFICATION_URL` tells a person what happened; `PING_URL` tells a machine. It
+is pinged when the export starts and again when it finishes, carrying the
+outcome, so a watchdog can tell a successful run from a failed one — and notice
+a run that never happened at all.
+
+```bash
+PING_URL=https://hc-ping.com/<your-uuid>
+```
+
+That is everything healthchecks needs. The outcome is appended as a path
+segment: `/start` when the export begins, `/0` when it succeeds, and
+`/<exit code>` when it fails.
+
+Services that expect the outcome somewhere else use a placeholder. There are
+two, each with its own vocabulary:
+
+| Placeholder | Start | Success | Failure |
+|-------------|-------------|-----------|------------------------|
+| `{code}`    | `start`     | `0`       | the export's exit code |
+| `{status}`  | *not pinged* | `up`     | `down`                 |
+
+A URL using `{status}` is not pinged at start: that vocabulary has no value
+meaning "starting", and a push monitor has no concept of one.
+
+```bash
+# healthchecks, written out explicitly — same behaviour as the example above
+PING_URL=https://hc-ping.com/<your-uuid>/{code}
+
+# uptime-kuma push monitor
+PING_URL=https://kuma.example.com/api/push/<token>?status={status}
+
+# uptime-kuma, with the exit code in the message
+PING_URL=https://kuma.example.com/api/push/<token>?status={status}&msg=exit-{code}
+```
+
+A trailing slash is removed before anything is appended, so
+`https://hc-ping.com/<uuid>` and `https://hc-ping.com/<uuid>/` behave the same.
+
+A failed ping never fails the backup. It is reported as a warning and the
+container still exits with the export's own status code. Each ping is given ten
+seconds and three attempts, so an unreachable monitor cannot hold the container
+open after an export that worked.
 
 ## Run in Unraid
 

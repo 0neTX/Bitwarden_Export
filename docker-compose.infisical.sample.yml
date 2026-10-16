@@ -12,4 +12,6 @@ services:
       - INFISICAL_TOKEN=st.aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       # Optional: Insfisical tokens subfolder collection
       #- INFISICAL_PATH=/
+      # Optional: Monitoring endpoint pinged at start and on completion (healthchecks, uptime-kuma, any dead man's switch)
+      #- PING_URL=https://hc-ping.com/<your-uuid>
       

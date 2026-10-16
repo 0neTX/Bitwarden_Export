@@ -4,6 +4,28 @@
 Yellow='\033[0;33m'       # Yellow
 Cyan='\033[0;36m'         # Cyan
 
+# Monitoring pings (PING_URL), for healthchecks, uptime-kuma or any dead man's
+# switch. Deliberately independent of NOTIFICATION_URL: one tells a person, the
+# other tells a machine, and neither is consulted to decide the other.
+# shellcheck source=root/usr/local/lib/bw-export/ping.sh
+. /usr/local/lib/bw-export/ping.sh
+
+# Reporting the outcome from a trap is what covers every exit path, including
+# the Infisical check below, which exits on its own. Running last also makes the
+# order against the notifications below stop mattering.
+# Invoked from the EXIT trap, which shellcheck cannot see: older versions call
+# this unreachable (SC2317), newer ones call it uninvoked (SC2329).
+# shellcheck disable=SC2329,SC2317
+ping_on_exit() {
+    local status=$?
+    if [[ "$status" -eq 0 ]]; then
+        send_ping success "$status"
+    else
+        send_ping failure "$status"
+    fi
+}
+trap ping_on_exit EXIT
+
 send_notification () {
     set -xe
     echo -e "\n${Cyan}Notification enabled: $NOTIFICATION_URL "
@@ -13,6 +35,10 @@ send_notification () {
 if [[ -n "${NOTIFICATION_URL}" ]]; then
     /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Started"  -u "$NOTIFICATION_URL"
 fi
+
+# Before the Infisical check below, so a failure there reads as start then fail
+# rather than as silence.
+send_ping start
 
 #Base Command
 command="su bitwarden -c /app/bw_export.sh "
