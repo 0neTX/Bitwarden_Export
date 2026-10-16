@@ -14,7 +14,11 @@
 
 services:
   vaultwarden:
-    image: docker.io/vaultwarden/server:1.37.2
+    # 1.37.4 or later: Bitwarden CLI 2026.9.0+ runs a "user key id" migration on
+    # unlock that posts to /api/accounts/key-management/user-key-id. Older
+    # Vaultwarden answers 404 and the CLI aborts, which the export reports as a
+    # wrong BW_PASSWORD (vaultwarden#7750, fixed by #7693 in 1.37.4).
+    image: docker.io/vaultwarden/server:1.37.4
     container_name: bwtest-vaultwarden
     environment:
       - SIGNUPS_ALLOWED=true

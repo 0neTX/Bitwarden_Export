@@ -7,7 +7,7 @@ Two layers:
 - **`run_ping_tests.sh`** — 33 assertions against the `PING_URL` helpers in
   `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
   three-line stub for `curl`.
-- **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.2 and a
+- **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.4 and a
   bw-export image built from the repo `Dockerfile`, used to validate issue #21
   end to end.
 
