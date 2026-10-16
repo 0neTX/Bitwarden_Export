@@ -48,6 +48,17 @@ fi
 if [[ -z "${ATTACHMENTS_PATH}" ]]; then
     save_folder_attachments="/var/attachments/"
     echo -e "\n$(date '+%F %T') ${Cyan}Info: ATTACHMENTS_PATH enviroment not provided. Using default value: /var/attachments"
+    # The README and docker-compose.yml used to mount /var/attachment (singular),
+    # which nothing here writes to: attachments went to the anonymous volume
+    # behind VOLUME /var/attachments and never reached the host. Honour such a
+    # mount rather than keep losing them until the compose file is updated.
+    # Only the mount needs checking: the image no longer creates /var/attachment,
+    # and VOLUME makes /var/attachments a mount point whether or not it is bound.
+    if mountpoint -q /var/attachment 2>/dev/null; then
+        save_folder_attachments="/var/attachment/"
+        echo -e "\n$(date '+%F %T') ${IYellow}Warning: /var/attachment is mounted. Saving attachments there."
+        echo -e "$(date '+%F %T') ${IYellow}Mount the host folder on /var/attachments instead; /var/attachment will stop being used in a future release."
+    fi
 else
     save_folder_attachments="${ATTACHMENTS_PATH}"
     if [[ ! -d "$save_folder_attachments" ]]; then
