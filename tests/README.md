@@ -2,7 +2,7 @@
 
 Two layers:
 
-- **`run_tests.sh`** — 80 assertions against `bw_export.sh` using a stateful mock
+- **`run_tests.sh`** — 87 assertions against `bw_export.sh` using a stateful mock
   of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers.
 - **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.2 and a
   bw-export image built from the repo `Dockerfile`, used to validate issue #21
@@ -14,15 +14,15 @@ Two layers:
 SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
 ```
 
-Expect `PASS=80 FAIL=0`. The suite is only worth anything if it fails on the
+Expect `PASS=87 FAIL=0`. The suite is only worth anything if it fails on the
 code it was written against, so as a control:
 
 ```bash
 git show 57aa29d:bw_export.sh > /tmp/orig.sh       # before the #21 fixes
-SCRIPT=/tmp/orig.sh bash tests/run_tests.sh        # PASS=39 FAIL=41
+SCRIPT=/tmp/orig.sh bash tests/run_tests.sh        # PASS=39 FAIL=42
 
 git show ae34553:bw_export.sh > /tmp/preattach.sh  # #21 fixed, attachments not yet
-SCRIPT=/tmp/preattach.sh bash tests/run_tests.sh   # PASS=55 FAIL=25
+SCRIPT=/tmp/preattach.sh bash tests/run_tests.sh   # PASS=55 FAIL=26
 ```
 
 T15–T19 cover the attachment block: the guard that never fired, and the fact
@@ -30,6 +30,9 @@ that item and file names used to be pasted into generated shell and executed.
 T20–T22 cover a download that fails: it has to be counted and reported, not
 folded into a run that claims success. T23–T24 cover rotation, which must not
 delete a complete backup to make room for an incomplete one.
+TM covers how the legacy `/var/attachment` fallback tells an anonymous volume
+from a real mount, using mountinfo lines in the formats of rootful Docker and
+rootless Podman. Against a script without the function it fails once.
 
 > `mock/bw` must be executable. On a filesystem that ignores the exec bit
 > (NTFS/exFAT via FUSE, some network mounts) copy `tests/` to a native Linux

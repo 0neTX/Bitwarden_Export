@@ -44,6 +44,16 @@ else
     fi
 fi
 
+# True when $1 is backed by an anonymous volume: what Docker and Podman create
+# for a VOLUME nobody bound. mountinfo's fourth field is the source path, which
+# for an anonymous volume ends in volumes/<64 hex id>/_data; a bind mount or a
+# named volume shows its own path or name there instead.
+#   $2  mountinfo file, /proc/self/mountinfo unless a test points elsewhere
+is_anonymous_volume() {
+    awk -v mp="$1" '$5 == mp { print $4 }' "${2:-/proc/self/mountinfo}" 2>/dev/null \
+        | grep -Eq '/volumes/[0-9a-f]{64}/_data$'
+}
+
 #Set locations to save attachment files
 if [[ -z "${ATTACHMENTS_PATH}" ]]; then
     save_folder_attachments="/var/attachments/"
@@ -52,9 +62,13 @@ if [[ -z "${ATTACHMENTS_PATH}" ]]; then
     # which nothing here writes to: attachments went to the anonymous volume
     # behind VOLUME /var/attachments and never reached the host. Honour such a
     # mount rather than keep losing them until the compose file is updated.
-    # Only the mount needs checking: the image no longer creates /var/attachment,
-    # and VOLUME makes /var/attachments a mount point whether or not it is bound.
-    if mountpoint -q /var/attachment 2>/dev/null; then
+    #
+    # Only when /var/attachments is that anonymous volume, though. VOLUME makes it
+    # a mount point either way, so being mounted says nothing; but someone who
+    # bound both paths to different folders already has attachments landing in
+    # the right one, and must not have them moved.
+    if mountpoint -q /var/attachment 2>/dev/null \
+            && { ! mountpoint -q /var/attachments 2>/dev/null || is_anonymous_volume /var/attachments; }; then
         save_folder_attachments="/var/attachment/"
         echo -e "\n$(date '+%F %T') ${IYellow}Warning: /var/attachment is mounted. Saving attachments there."
         echo -e "$(date '+%F %T') ${IYellow}Mount the host folder on /var/attachments instead; /var/attachment will stop being used in a future release."
