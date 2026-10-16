@@ -4,7 +4,12 @@
 
 **[Bitwarden_Export](https://github.com/0neTX/Bitwarden_Export)**: Docker to backup your Bitwarden vault contents
 
-[![CD to Docker Hub to Release-Latest](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml/badge.svg?branch=main&event=status)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml)
+[![CI](https://github.com/0neTX/Bitwarden_Export/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/ci.yml)
+[![Release](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml/badge.svg)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml)
+[![Latest release](https://img.shields.io/github/v/release/0neTX/Bitwarden_Export?label=release)](https://github.com/0neTX/Bitwarden_Export/releases)
+[![Docker pulls](https://img.shields.io/docker/pulls/0netx/bw-export?logo=docker&label=pulls)](https://hub.docker.com/r/0netx/bw-export)
+[![Image size](https://img.shields.io/docker/image-size/0netx/bw-export/latest?logo=docker&label=size)](https://hub.docker.com/r/0netx/bw-export/tags)
+[![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
 
 ## Features
 
