@@ -26,7 +26,7 @@ jobs:
             bw_export.sh entrypoint.sh \
             tests/mock/bw tests/run_tests.sh tests/e2e-setup.sh tests/e2e-verify.sh
 
-      # 80 assertions against a stateful mock of the Bitwarden CLI. This covers
+      # 109 assertions against a stateful mock of the Bitwarden CLI. This covers
       # the script's logic only; it says nothing about the real CLI, which the
       # end-to-end suite in tests/e2e-setup.sh exercises.
       - name: unit suite

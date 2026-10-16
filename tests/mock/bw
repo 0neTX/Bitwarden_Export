@@ -3,6 +3,8 @@
 #   BW_STATE      : file holding the CLI's persisted state (~/.config/Bitwarden CLI/data.json)
 #   BW_REAL_PW    : the master password the *server* currently accepts
 #   BW_FAIL_CONFIG/BW_FAIL_LOGIN : force those subcommands to fail
+#   BW_FAIL_EXPORT : "personal" or an organization id whose export fails
+#   BW_FAIL_LIST   : "organizations" or "items", a listing that fails
 STATE="${BW_STATE:?}"
 LOG="${BW_CALLLOG:-/dev/null}"
 echo "bw $*" >> "$LOG"
@@ -47,6 +49,11 @@ case "$1" in
 
   list)
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
+    # BW_FAIL_LIST names a listing (organizations, items) that fails the way it
+    # does once a 401 has logged the CLI out.
+    if [ -n "${BW_FAIL_LIST:-}" ] && [ "$2" = "$BW_FAIL_LIST" ] && [ "$3" != --trash ]; then
+      echo "You are not logged in." >&2; exit 1
+    fi
     # "list items --trash" is a different question; only the vault listing is seeded.
     if [ "$2" = items ] && [ "$3" != --trash ] && [ -s "${BW_ITEMS_FILE:-}" ]; then
       cat "$BW_ITEMS_FILE"
@@ -79,7 +86,19 @@ case "$1" in
   export)
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
     [ -n "$BW_SLOW_EXPORT" ] && sleep 5
-    for a in "$@"; do [ "$prev" = "--output" ] && out="$a"; prev="$a"; done
-    mkdir -p "$out" && : > "$out/export.json"; exit 0 ;;
+    org=personal
+    for a in "$@"; do
+      [ "$prev" = "--output" ] && out="$a"
+      [ "$prev" = "--organizationid" ] && org="$a"
+      prev="$a"
+    done
+    # BW_FAIL_EXPORT names "personal" or an organization id whose export fails
+    # the way the real CLI does on an unwritable folder: one line on stderr,
+    # exit 1, nothing written.
+    if [ -n "${BW_FAIL_EXPORT:-}" ] && [ "$org" = "$BW_FAIL_EXPORT" ]; then
+      echo "Error: EACCES: permission denied, mkdir '$out'" >&2
+      exit 1
+    fi
+    mkdir -p "$out" && : > "$out/export-$org.json"; exit 0 ;;
   *) exit 0 ;;
 esac
