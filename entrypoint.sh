@@ -47,15 +47,25 @@ command="su bitwarden -c /app/bw_export.sh "
 logfile=/app/bw-export-logfile.log
 
 if [[ -n "${INFISICAL_TOKEN}" ]]; then
+    # An array, so that no INFISICAL_PATH means no argument at all. A quoted
+    # empty string reaches Infisical as an argument, which it rejects, so the
+    # check below failed whenever INFISICAL_PATH was not set.
+    infisical_args=()
     if [[ -n "${INFISICAL_PATH}" ]]; then
         infisicalpath="--path=${INFISICAL_PATH}"
+        infisical_args=("$infisicalpath")
     fi
     echo -e "\n${Yellow}Infisical enabled! "
     #Run this command to test connection with Infiscal
-    infisical run "$infisicalpath" --command="echo BW_CLIENTID:$BW_CLIENTID"
+    infisical_output=$(infisical run "${infisical_args[@]}" --command="echo BW_CLIENTID:$BW_CLIENTID" 2>&1)
     returncode=$?
-    if [[ -n "${NOTIFICATION_URL}" ]]  &&  [[ "$returncode" -ne "0" ]]; then
-        send_notification
+    echo "$infisical_output"
+    # Stop here whether or not notifications are on: without the secrets the
+    # export cannot run. The run log does not exist yet, so the message says
+    # what failed and carries Infisical's own last lines.
+    if [[ "$returncode" -ne "0" ]]; then
+        send_message "Bitwarden/Vaultwarden Export: Failed ❌ Infisical could not provide the secrets (exit $returncode). Check INFISICAL_TOKEN and INFISICAL_PATH.
+$(tail -n 5 <<<"$infisical_output")"
         exit 1
     fi
     command="infisical run $infisicalpath --command='$command'"
