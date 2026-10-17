@@ -9,6 +9,8 @@ Cyan='\033[0;36m'         # Cyan
 # other tells a machine, and neither is consulted to decide the other.
 # shellcheck source=root/usr/local/lib/bw-export/ping.sh
 . /usr/local/lib/bw-export/ping.sh
+# shellcheck source=root/usr/local/lib/bw-export/notify.sh
+. /usr/local/lib/bw-export/notify.sh
 
 # Reporting the outcome from a trap is what covers every exit path, including
 # the Infisical check below, which exits on its own. Running last also makes the
@@ -26,15 +28,15 @@ ping_on_exit() {
 }
 trap ping_on_exit EXIT
 
+# The failure notification: the end of the run log.
 send_notification () {
-    set -xe
-    echo -e "\n${Cyan}Notification enabled: $NOTIFICATION_URL "
-    /app/shoutrrr send -m "$(tail -n 15 "$logfile")"  -u "$NOTIFICATION_URL"
+    send_message "$(tail -n 15 "$logfile" 2>/dev/null)"
 }
 
 if [[ -n "${NOTIFICATION_URL}" ]]; then
-    /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Started"  -u "$NOTIFICATION_URL"
+    echo -e "\n${Cyan}Notifications enabled."
 fi
+send_message "Bitwarden/Vaultwarden Export: Started"
 
 # Before the Infisical check below, so a failure there reads as start then fail
 # rather than as silence.
@@ -105,12 +107,10 @@ done
 trap - TERM INT
 echo Return Code: $return
 
-if [[ -n "${NOTIFICATION_URL}" ]]; then
-    if [[ "$return" -ne "0" ]]; then
-        send_notification || true
-    else
-        /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Successfully completed ✅"  -u "$NOTIFICATION_URL" || true
-    fi
+if [[ "$return" -ne "0" ]]; then
+    send_notification
+else
+    send_message "Bitwarden/Vaultwarden Export: Successfully completed ✅"
 fi
 
 # Report what the export actually did. Without this the container always exited
