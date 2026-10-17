@@ -7,6 +7,8 @@ Two layers:
 - **`run_ping_tests.sh`** — 33 assertions against the `PING_URL` helpers in
   `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
   three-line stub for `curl`.
+- **`run_notify_tests.sh`** — 13 assertions against the `NOTIFICATION_URL` helper
+  in `root/usr/local/lib/bw-export/notify.sh`, with a stub for `shoutrrr`.
 - **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.4 and a
   bw-export image built from the repo `Dockerfile`, used to validate issue #21
   end to end.
@@ -79,6 +81,36 @@ build_ping_url() { printf '%s\n' "$1/$2"; }
 send_ping() { curl -fsS --retry 3 "${PING_URL}/$1"; }
 EOF
 LIB=/tmp/naive.sh bash tests/run_ping_tests.sh   # PASS=3 FAIL=30
+```
+
+## Notify suite
+
+```bash
+bash tests/run_notify_tests.sh
+```
+
+Expect `PASS=13 FAIL=0`. The notification URL carries the service's
+credentials (a Telegram bot token, a Gotify app token), so the suite checks that
+it reaches `shoutrrr` through `SHOUTRRR_URL` and never through its argv, which
+any user on the host can read with `ps`; that it stays out of the log, also
+under `set -x` and when `shoutrrr` fails with the address in its error; that a
+failing service leaves the caller's status alone, even under `set -e`; and that
+an empty message is replaced, since Telegram rejects one and the alert would be
+lost. The stub records the argv, the environment and the message.
+
+As a control, the previous behaviour (print the URL, trace, pass it with `-u`)
+fails 9 of the 13:
+
+```bash
+cat > /tmp/old.sh <<'END'
+send_message() {
+    [[ -z "${NOTIFICATION_URL:-}" ]] && return 0
+    set -xe
+    echo -e "\nNotification enabled: $NOTIFICATION_URL "
+    "${SHOUTRRR_BIN:-/app/shoutrrr}" send -m "$1" -u "$NOTIFICATION_URL"
+}
+END
+LIB=/tmp/old.sh bash tests/run_notify_tests.sh   # PASS=4 FAIL=9
 ```
 
 ## End-to-end suite

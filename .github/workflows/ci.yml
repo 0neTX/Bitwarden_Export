@@ -24,7 +24,9 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 \
             bw_export.sh entrypoint.sh root/usr/local/lib/bw-export/ping.sh \
+            root/usr/local/lib/bw-export/notify.sh \
             tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
+            tests/run_notify_tests.sh \
             tests/e2e-setup.sh tests/e2e-verify.sh
 
       # 116 assertions against a stateful mock of the Bitwarden CLI. This covers
@@ -38,6 +40,11 @@ jobs:
       # entrypoint.sh sources, which cannot be reached through bw_export.sh.
       - name: ping suite
         run: bash tests/run_ping_tests.sh
+
+      # 13 assertions against the NOTIFICATION_URL helper, for the same reason:
+      # entrypoint.sh sources it and cannot be sourced by a test itself.
+      - name: notify suite
+        run: bash tests/run_notify_tests.sh
 
   build:
     name: docker build
