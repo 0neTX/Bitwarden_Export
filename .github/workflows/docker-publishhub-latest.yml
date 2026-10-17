@@ -20,7 +20,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # ARG IMAGE_VERSION in the Dockerfile is the single source of truth for
       # the image's own version. A tag that disagrees with it would publish
