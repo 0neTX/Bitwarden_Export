@@ -1,0 +1,100 @@
+name: Bug report
+description: The export fails, or does something other than what it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The log and how the container is run are usually what decide whether a
+        report can be acted on. Issue #21 only reproduced on a container that is
+        **restarted** rather than recreated, and took several rounds to pin down
+        for want of that one detail.
+
+  - type: input
+    id: image
+    attributes:
+      label: Image tag
+      description: What you are running, from your compose file or `docker inspect`.
+      placeholder: 0netx/bw-export:latest
+    validations:
+      required: true
+
+  - type: dropdown
+    id: server
+    attributes:
+      label: Server
+      options:
+        - Vaultwarden (self-hosted)
+        - Bitwarden cloud
+        - Bitwarden self-hosted
+    validations:
+      required: true
+
+  - type: input
+    id: server-version
+    attributes:
+      label: Server version
+      placeholder: Vaultwarden 1.37.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: lifecycle
+    attributes:
+      label: How does the container run?
+      description: >-
+        Whether the container is reused or recreated matters. Some failures only
+        appear on a reused one, because a recreated container throws away the
+        Bitwarden CLI state along with the problem.
+      options:
+        - docker run --rm (a new container every time)
+        - docker compose up (a new container every time)
+        - docker start, or a restart policy (the same container reused)
+        - cron or a scheduler against an existing container
+        - Unraid template
+        - Something else, described below
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >-
+        The whole container log for a failing run, including the final
+        `Return Code:` line. Please redact anything identifying.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      description: Skip this if the log makes it obvious.
+    validations:
+      required: false
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: >-
+        The optional variables you set — `BW_URL_SERVER`, `KEEP_LAST_BACKUPS`,
+        `NOTIFICATION_URL`, `INFISICAL_TOKEN`, `FILE_LOG`, `PUID`/`PGID`. Names
+        and shapes, never the values.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: >-
+            There are no passwords, API keys, session tokens or notification
+            URLs in what I pasted above.
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true
