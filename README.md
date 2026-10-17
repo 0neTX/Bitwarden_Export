@@ -181,6 +181,15 @@ When export finish correctly, you should receive a notification:
 
 ![alt text](docs/assets/bot-notification-1.png)
 
+The URL holds the bot token, so the container never prints it and hands it to
+Shoutrrr through the environment rather than on its command line, where any
+user on the host could read it with `ps`. If a notification cannot be sent, the
+log says so without the address, and the backup's exit code is not affected.
+
+If the Infisical secrets cannot be fetched, the container stops with exit code 1
+and, when notifications are on, sends a message saying so with Infisical's own
+error.
+
 ### Notification in Gotify
 
 The notification URL is the Gotify host followed by an **application token**:
