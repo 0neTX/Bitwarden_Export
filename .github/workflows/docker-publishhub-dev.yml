@@ -7,27 +7,41 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
+      # bitwarden/clients releases cli-, desktop-, browser- and web- from the
+      # same repo, and "the latest release" is usually not the CLI: the previous
+      # step tagged an image :web-v2026.8.0. Ask for the newest cli- one.
       - id: bitwardencli
-        uses: pozetroninc/github-action-get-latest-release@master
-        with:
-          owner: bitwarden
-          repo: clients
-          excludes: prerelease, draft      
+        name: Resolve latest Bitwarden CLI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api 'repos/bitwarden/clients/releases?per_page=100' \
+            --jq '[.[] | select(.draft == false and .prerelease == false)
+                       | select(.tag_name | startswith("cli-v"))][0].tag_name')
+          if [ -z "$tag" ]; then echo "no cli- release found" >&2; exit 1; fi
+          echo "version=${tag#cli-v}" >> "$GITHUB_OUTPUT"
+          echo "Resolved $tag"
       -
         name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       -
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       -
         name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       -
         name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           push: true
-          tags: 0netx/bw-export:beta, 0netx/bw-export:${{ steps.bitwardencli.outputs.release }}
+          # Actually build with the version we just resolved. Until now it was
+          # only used as a tag, so the image could advertise one CLI and ship
+          # whatever the Dockerfile had pinned.
+          build-args: |
+            BW_CLI_VERSION=${{ steps.bitwardencli.outputs.version }}
+          tags: 0netx/bw-export:beta, 0netx/bw-export:${{ steps.bitwardencli.outputs.version }}

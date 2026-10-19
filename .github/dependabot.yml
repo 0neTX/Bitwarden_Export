@@ -1,0 +1,24 @@
+version: 2
+
+updates:
+  # Six actions had to be bumped by hand in #23 after GitHub started warning
+  # about Node 20 on every run. This keeps them current instead.
+  #
+  # target-branch matters: without it Dependabot opens its pull requests
+  # against main, which is the release branch. Everything lands on dev first.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    open-pull-requests-limit: 5
+    # No labels: are set. Dependabot can only apply labels that already exist in
+    # the repository, and there is no "dependencies" label here yet.
+
+  # Deliberately no docker ecosystem here. The base image is pinned to an LTS
+  # release on purpose, and BW_CLI_VERSION and SHOUTRRR_VERSION are pinned to
+  # versions that were tested against Vaultwarden; a bot proposing the newest of
+  # each would be noise at best. The nightly end-to-end run is what catches a
+  # Bitwarden CLI release that breaks login.

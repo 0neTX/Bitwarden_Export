@@ -4,7 +4,7 @@ services:
     image: 0netx/bw-export:latest
     volumes:
       - ./export:/var/data
-      - ./export:/var/attachment
+      - ./export:/var/attachments
     environment:
       - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
       - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
@@ -13,13 +13,15 @@ services:
       #- BW_URL_SERVER=<YOUR VAULTWARDER URL SERVER>
       # Optional: Warning, Incorrect value may have malfunction effect. By default, /var/data/
       # - OUTPUT_PATH=<Output path i.e. /var/data/ >
-      # Optional: Warning, Incorrect value may have malfunction effect. By default, /var/attachment/
-      # - ATTACHMENTS_PATH=<attachment path i.e. /var/attachment/ >
+      # Optional: Warning, Incorrect value may have malfunction effect. By default, /var/attachments/
+      # - ATTACHMENTS_PATH=<attachment path i.e. /var/attachments/ >
       - EXPORT_PASSWORD=<Export password. Export will be encrypted with this password>
       # Optional: If not provided, the service will export all organizations in vault.
       # - BW_ORGANIZATIONS_LIST=<Organization list id, comma separated>
       # Optional: Execution logging file. Please check output path is mapping inside a volume
       # - FILE_LOG=/var/data/bw-export-logfile.log
       # Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted.
-      # - KEEP_LAST_BACKUPS=5      
+      # - KEEP_LAST_BACKUPS=5
+      # Optional: Monitoring endpoint pinged at start and on completion (healthchecks, uptime-kuma, any dead man's switch)
+      # - PING_URL=https://hc-ping.com/<your-uuid>      
 

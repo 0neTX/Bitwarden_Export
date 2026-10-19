@@ -1,0 +1,108 @@
+name: CI
+
+# Nothing gated the publish workflows before this: a broken bw_export.sh could
+# reach :beta and then :latest without a single check running.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  test:
+    name: shellcheck + unit suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned rather than using the runner's shellcheck: versions disagree about
+      # which findings exist, so an image update would fail unrelated pull
+      # requests. A function called only from a trap is SC2317 on 0.9 and SC2329
+      # on 0.11, which is exactly how this first went red.
+      - name: shellcheck
+        run: |
+          docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 \
+            bw_export.sh entrypoint.sh root/usr/local/lib/bw-export/ping.sh \
+            root/usr/local/lib/bw-export/notify.sh \
+            tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
+            tests/run_notify_tests.sh \
+            tests/e2e-setup.sh tests/e2e-verify.sh
+
+      # 116 assertions against a stateful mock of the Bitwarden CLI. This covers
+      # the script's logic only; it says nothing about the real CLI, which the
+      # end-to-end suite in tests/e2e-setup.sh exercises.
+      - name: unit suite
+        run: SCRIPT="$PWD/bw_export.sh" bash tests/run_tests.sh
+
+      # 33 assertions against the PING_URL helpers. Separate from the suite
+      # above because it drives a different unit: the URL building that
+      # entrypoint.sh sources, which cannot be reached through bw_export.sh.
+      - name: ping suite
+        run: bash tests/run_ping_tests.sh
+
+      # 13 assertions against the NOTIFICATION_URL helper, for the same reason:
+      # entrypoint.sh sources it and cannot be sourced by a test itself.
+      - name: notify suite
+        run: bash tests/run_notify_tests.sh
+
+  build:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Build only. Catches a broken Dockerfile at review time rather than when
+      # a publish workflow pushes it to Docker Hub. Loaded into the daemon so
+      # the labels can be read back below.
+      - name: build image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: bw-export:ci
+
+      # Labels are inherited, and ubuntu:24.04 sets
+      # org.opencontainers.image.version=24.04 on itself, so until this image
+      # declared its own it announced the base distro's version as its own:
+      # Portainer and anything else reading the standard key showed 24.04, and
+      # :latest also reported ref.name=ubuntu. Both version labels come from
+      # ARG IMAGE_VERSION, so neither can drift from the other.
+      - name: image reports its own version
+        run: |
+          set -euo pipefail
+          declared=$(sed -n 's/^ARG IMAGE_VERSION="\(.*\)"$/\1/p' Dockerfile)
+          if [ -z "$declared" ]; then
+            echo "::error::no ARG IMAGE_VERSION found in the Dockerfile"
+            exit 1
+          fi
+          for key in version org.opencontainers.image.version; do
+            got=$(docker inspect --format "{{index .Config.Labels \"$key\"}}" bw-export:ci)
+            echo "$key = $got"
+            if [ "$got" != "$declared" ]; then
+              echo "::error::label $key is \"$got\", expected \"$declared\""
+              exit 1
+            fi
+          done
+          name=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.ref.name"}}' bw-export:ci)
+          echo "org.opencontainers.image.ref.name = $name"
+          if [ "$name" = "ubuntu" ]; then
+            echo "::error::ref.name is still inherited from the base image"
+            exit 1
+          fi
+
+          # base.name is written out in full, so it can fall out of step with a
+          # bumped FROM. That is the same drift this whole change is about.
+          base=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.base.name"}}' bw-export:ci)
+          from=$(sed -n 's/^FROM \(.*\)$/\1/p' Dockerfile | head -1)
+          echo "org.opencontainers.image.base.name = $base (FROM $from)"
+          case "$base" in
+            "$from"|*"/$from") ;;
+            *)
+              echo "::error::base.name is \"$base\" but the Dockerfile builds FROM \"$from\""
+              exit 1
+              ;;
+          esac

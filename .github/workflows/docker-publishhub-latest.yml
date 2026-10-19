@@ -12,33 +12,59 @@ on:
         - debug
   push:
     tags:
-      - 'v[0-9].[0-9]'
+      # Glob, not a regex: [0-9] matches exactly one character, so the old
+      # 'v[0-9].[0-9]' never fired for v1.10 or v1.11.
+      - 'v[0-9]*.[0-9]*'
 name: CD to Docker Hub to Release-Latest
 jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+
+      # ARG IMAGE_VERSION in the Dockerfile is the single source of truth for
+      # the image's own version. A tag that disagrees with it would publish
+      # :v1.11 and :latest announcing version=1.10, which is the drift this
+      # guard exists to make impossible. Refuse before anything is pushed.
+      #
+      # workflow_dispatch can be run from a branch, where there is no version
+      # in the ref to compare against, so the check only applies to tags.
+      - name: tag agrees with IMAGE_VERSION
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          declared=$(sed -n 's/^ARG IMAGE_VERSION="\(.*\)"$/\1/p' Dockerfile)
+          if [ -z "$declared" ]; then
+            echo "::error::no ARG IMAGE_VERSION found in the Dockerfile"
+            exit 1
+          fi
+          tagged=${GITHUB_REF_NAME#v}
+          echo "Dockerfile declares $declared, tag says $tagged"
+          if [ "$declared" != "$tagged" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match ARG IMAGE_VERSION=\"$declared\" in the Dockerfile. Bump the Dockerfile on dev, merge, then re-tag."
+            exit 1
+          fi
+
       -
         name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       -
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       -
         name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       -
         name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/bw-export:${{  github.ref_name }}, ${{ secrets.DOCKER_USERNAME }}/bw-export:latest
-      - uses: actions/checkout@v4
       - name: Docker Hub Description
-        uses: peter-evans/dockerhub-description@v3
+        uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}

@@ -4,7 +4,12 @@
 
 **[Bitwarden_Export](https://github.com/0neTX/Bitwarden_Export)**: Docker to backup your Bitwarden vault contents
 
-[![CD to Docker Hub to Release-Latest](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml/badge.svg?branch=main&event=status)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml)
+[![CI](https://github.com/0neTX/Bitwarden_Export/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/ci.yml)
+[![Release](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml/badge.svg)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml)
+[![Latest release](https://img.shields.io/github/v/release/0neTX/Bitwarden_Export?label=release)](https://github.com/0neTX/Bitwarden_Export/releases)
+[![Docker pulls](https://img.shields.io/docker/pulls/0netx/bw-export?logo=docker&label=pulls)](https://hub.docker.com/r/0netx/bw-export)
+[![Image size](https://img.shields.io/docker/image-size/0netx/bw-export/latest?logo=docker&label=size)](https://hub.docker.com/r/0netx/bw-export/tags)
+[![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
 
 ## Features
 
@@ -17,7 +22,8 @@ This simple bash docker image uses the Bitwarden CLI to perform three backup tas
 ### New Features
 
 - [x] Securize authentication tokens with [Infisical Vault](#safety-infisical)
-- [x] Receive notification in any platform with [Shoutrrr](https://containrrr.dev/shoutrrr/v0.8/services/overview/)
+- [x] Receive notification in any platform with [Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/)
+- [x] Passwords never appear on a command line, so other users on the host cannot read them with `ps` ([details](#safety-command-line))
 
 The docker image provides the choice of creating unencrypted export files or password-encrypted export files. Attachments are not encrypted.
 
@@ -31,6 +37,8 @@ This docker image requires the following:
 
 - [Docker](https://docker.com) (Obviously)
 - Personal API Keys for CLI Authentication <a href="https://bitwarden.com/help/personal-api-key/" target="_blank">https://bitwarden.com/help/personal-api-key/</a>
+- A self-hosted server reachable over **HTTPS**: the Bitwarden CLI refuses plain-HTTP URLs.
+- **Vaultwarden 1.37.4 or later.** The bundled Bitwarden CLI (2026.10.0) calls an endpoint that older Vaultwarden releases do not have, and the export then fails with `Failed to unlock vault with BW_PASSWORD` even though the password is right ([vaultwarden#7693](https://github.com/dani-garcia/vaultwarden/pull/7693)). bitwarden.com is not affected.
 
 ## How to Use the docker image
 
@@ -55,7 +63,7 @@ The following are created by the docker image:
 If you prefer to run it manually or just once, run the following command:
 
 ```bash
-docker run --name bw-export -v ./export/data:/var/data -v ./export/attachment:/var/attachment -e "BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>" -e "BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>" -e "BW_PASSWORD=<BITWARDEN PASSWORD>" 0netx/bw-export:latest
+docker run --name bw-export -v ./export/data:/var/data -v ./export/attachments:/var/attachments -e "BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>" -e "BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>" -e "BW_PASSWORD=<BITWARDEN PASSWORD>" 0netx/bw-export:latest
 ```
 
 ### Run container in any plattorm with docker compose:
@@ -76,7 +84,7 @@ docker run --name bw-export -v ./export/data:/var/data -v ./export/attachment:/v
         # Optional: Own Vaultwarden/Bitarden selfhosted server
         #- BW_URL_SERVER=<YOUR VAULTWARDER URL SERVER>
         - OUTPUT_PATH=<Output path i.e. /var/data/ >
-        - ATTACHMENTS_PATH=<attachment path i.e. /var/attachment/ >
+        - ATTACHMENTS_PATH=<attachment path i.e. /var/attachments/ >
         - EXPORT_PASSWORD=<Export password. Export will be encrypted with this password>
         - BW_ORGANIZATIONS_LIST=<Organization list id, comma separated>
         # Optional: Map the container's internal user to a user on the host machine
@@ -110,13 +118,29 @@ You must report the following variables so that the container can authenticate i
 | Variable                          | Description                                                                              |
 |-----------------------------------|------------------------------------------------------------------------------------------|
 | `BW_ORGANIZATIONS_LIST`           | If you want to make a backup of your organizations, set one or more organizations separated by comma. |
-| `NOTIFICATION_URL`                | Shoutrrr notification url [Service overview](https://containrrr.dev/shoutrrr/v0.8/services/overview/) |
+| `NOTIFICATION_URL`                | Shoutrrr notification url [Service overview](https://shoutrrr.nickfedor.com/latest/services/overview/) |
 | `KEEP_LAST_BACKUPS`               | Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted. |
 | `FILE_LOG`                        | Optional: Execution logging file. Please check output path is mapping inside a volume    |
+| `PING_URL`                        | Optional: monitoring endpoint pinged when the export starts and when it finishes, carrying the outcome. For healthchecks, uptime-kuma or any dead man's switch. See [Monitoring](#monitoring-healthchecks-uptime-kuma) |
 
 ### Safety
 
 This container is based on an automation of the official [Bitwarden CLI client](https://bitwarden.com/help/cli/). **This script does not save, trace or store any information.** The session is closed after the backup has been performed.
+
+#### Passwords stay off the command line {#safety-command-line}
+
+Every user on the host can read the command line of any process with `ps`,
+including the processes inside a container, with Docker as with Podman. So the
+script never passes a password as an argument to the Bitwarden CLI:
+
+- the master password (`BW_PASSWORD`) reaches `bw unlock` through an environment
+  variable (`--passwordenv`), which only the process owner and root can read;
+- the export password (`EXPORT_PASSWORD`) reaches `bw export` through stdin, by
+  answering the CLI's own password prompt. The prompt is kept out of the log,
+  since it is redrawn once per character and would give away the length.
+
+Nothing has to be configured for this: both variables keep accepting either the
+value or the path of a file holding it.
 
 If you wish you can configure each variable using [docker secrets](https://docs.docker.com/compose/use-secrets/) as in the example [docker-compose.secrets.sample.yml](https://github.com/0neTX/Bitwarden_Export/blob/main/docker-compose.secrets.sample.yml)
 
@@ -155,6 +179,10 @@ echo BW_PASSWORD  > ./.secrets/.bwpassword
 
 - Edit Docker compose and add the variables `INFISICAL_TOKEN` with previous generated token and `INFISICAL_PATH` with *Secrets Path* value
 
+> A service token carries its own environment and *Secrets Path*, and Infisical always applies them: `INFISICAL_PATH` cannot point a service token anywhere else, and a wrong value is not reported as an error. If the export runs with the wrong secrets, check the token's scope in Infisical, not `INFISICAL_PATH`.
+>
+> When the same variable is set both in the compose file and in Infisical, the Infisical value is used.
+
 ![compose sample](docs/assets/infisical4.png)
 
 ### Notification in Telegram
@@ -174,6 +202,81 @@ NOTIFICATION_URL=telegram://1009999999:AAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@t
 When export finish correctly, you should receive a notification:
 
 ![alt text](docs/assets/bot-notification-1.png)
+
+The URL holds the bot token, so the container never prints it and hands it to
+Shoutrrr through the environment rather than on its command line, where any
+user on the host could read it with `ps`. If a notification cannot be sent, the
+log says so without the address, and the backup's exit code is not affected.
+
+If the Infisical secrets cannot be fetched, the container stops with exit code 1
+and, when notifications are on, sends a message saying so with Infisical's own
+error.
+
+### Notification in Gotify
+
+The notification URL is the Gotify host followed by an **application token**:
+
+```bash
+NOTIFICATION_URL=gotify://$GOTIFY_HOST/$GOTIFY_TOKEN
+```
+
+Example:
+
+```bash
+NOTIFICATION_URL=gotify://gotify.example.com/gtfya.AbCdEf0123456789AbCdEf0123456789AbCdEf01234
+```
+
+If Gotify runs under a subpath, add it before the token (`gotify://example.com/gotify/$GOTIFY_TOKEN`). If it is served over plain HTTP instead of HTTPS, append `?disabletls=yes`.
+
+Both token formats are accepted: the legacy one from Gotify below 3.0.0 (15 characters starting with `A`) and the one issued by Gotify 3.0.0 and later (`gtfya.` prefix, around 50 characters). Support for the newer format is why this image builds Shoutrrr from the [nicholas-fedor fork](https://github.com/nicholas-fedor/shoutrrr): the original `containrrr` project stopped at v0.8.0, which rejects any token that is not exactly 15 characters starting with `A`.
+
+### Monitoring (healthchecks, uptime-kuma)
+
+`NOTIFICATION_URL` tells a person what happened; `PING_URL` tells a machine. It
+is pinged when the export starts and again when it finishes, carrying the
+outcome, so a watchdog can tell a successful run from a failed one — and notice
+a run that never happened at all.
+
+```bash
+PING_URL=https://hc-ping.com/<your-uuid>
+```
+
+That is everything healthchecks needs. The outcome is appended as a path
+segment: `/start` when the export begins, `/0` when it succeeds, and
+`/<exit code>` when it fails.
+
+Services that expect the outcome somewhere else use a placeholder. There are
+two, each with its own vocabulary:
+
+| Placeholder | Start | Success | Failure |
+|-------------|-------------|-----------|------------------------|
+| `{code}`    | `start`     | `0`       | the export's exit code |
+| `{status}`  | *not pinged* | `up`     | `down`                 |
+
+A URL using `{status}` is not pinged at start: that vocabulary has no value
+meaning "starting", and a push monitor has no concept of one.
+
+```bash
+# healthchecks, written out explicitly — same behaviour as the example above
+PING_URL=https://hc-ping.com/<your-uuid>/{code}
+
+# uptime-kuma push monitor
+PING_URL=https://kuma.example.com/api/push/<token>?status={status}
+
+# uptime-kuma, with the exit code in the message
+PING_URL=https://kuma.example.com/api/push/<token>?status={status}&msg=exit-{code}
+```
+
+A trailing slash is removed before anything is appended, so
+`https://hc-ping.com/<uuid>` and `https://hc-ping.com/<uuid>/` behave the same.
+
+A failed ping never fails the backup. It is reported as a warning and the
+container still exits with the export's own status code.
+
+An unreachable monitor also cannot hold the container open for long. A refused
+connection or a hostname that does not resolve fails in about a second; a host
+that silently drops the packets costs at most eleven, and there are two pings in
+a run, so roughly twenty seconds in the worst case.
 
 ## Run in Unraid
 
@@ -211,6 +314,25 @@ It is most likely that you will use the `id` of yourself, which can be obtained 
 id $user
 ```
 
+### Rootless Podman
+
+Rootless Podman maps the container's uids onto your subordinate uid range, so
+`PUID=1000` inside the container is **not** uid 1000 on the host: exports land
+owned by an unknown user, or cannot be written at all. Add the
+[`compose.podman.yml`](compose.podman.yml) override, which uses `keep-id` so your
+uid means the same inside and outside the container:
+
+```shell
+podman compose -f docker-compose.yml -f compose.podman.yml up
+```
+
+With it, `PUID`/`PGID` behave exactly as under Docker. Without `PUID`, rootless
+Podman already writes the files as you, since the container's root is your user.
+The override is Podman only: Docker rejects `keep-id`.
+
+On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g.
+`./export:/var/data:z`, or the container cannot read them.
+
 ## KEEP_LAST_BACKUPS Variable
 
 Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted.
@@ -224,6 +346,51 @@ Each export is saved in the output folder with the template `<DateTime>-bw-expor
 When the variable `KEEP_LAST_BACKUPS` is set, the container will sort the folders and delete the oldest ones while keeping the number of folders indicated by the variable.
 
 ![Keep Last Sample](docs/assets/keep-last.png)
+
+## Upgrading: attachments path
+
+Earlier versions of this README and of `docker-compose.yml` mounted the
+attachments folder on `/var/attachment`, but the image saves attachments to
+`/var/attachments`. With that mount the export succeeded and **the attachments
+never reached the host folder**: they went to an anonymous Docker volume
+instead. Unraid's template already uses `/var/attachments` and is not affected.
+
+**What changes for you**
+
+- **You mount `/var/attachment` and do not set `ATTACHMENTS_PATH`:** nothing
+  breaks. The image notices the old mount, saves the attachments there, and logs
+  a warning. Change the mount to `/var/attachments` when convenient:
+
+  ```yaml
+  volumes:
+    - ./export:/var/data
+    - ./export:/var/attachments
+  ```
+
+- **You mount `/var/attachments`, or set `ATTACHMENTS_PATH`:** nothing changes.
+  That includes mounting both paths to different folders: `/var/attachments`
+  keeps being used.
+- **You set `ATTACHMENTS_PATH=/var/attachment` without mounting it:** the run
+  now fails with `Could not find the folder in which to save the attachments`.
+  Before, the files were written inside the container and lost with it. Mount a
+  folder there, or drop the variable.
+
+**Recovering the attachments saved so far**
+
+They are in the anonymous volume of your existing container, as long as it has
+not been removed with `docker rm -v` or run with `--rm` (`docker compose`
+keeps anonymous volumes when it recreates a container). Copy them out before
+recreating it, replacing `bw-export` with your container's name and `./export`
+with your host folder:
+
+```bash
+docker run --rm --volumes-from bw-export -v ./export:/restore \
+    --entrypoint cp 0netx/bw-export:latest -a /var/attachments/. /restore/
+```
+
+Each run's attachments land in the same dated folder as its vault export. Under
+Docker the copied files belong to root; add `--user "$(id -u):$(id -g)"` if you
+need them to be yours (on SELinux hosts, also `:z` on the `/restore` mount).
 
 # Developers only -  How to build the image
 

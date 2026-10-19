@@ -1,0 +1,18 @@
+# Override for rootless Podman. Use it on top of any compose file here:
+#
+#   docker compose -f docker-compose.yml -f compose.podman.yml up
+#   podman compose -f docker-compose.yml -f compose.podman.yml up
+#
+# Rootless Podman maps container uids onto your subordinate uid range, so
+# PUID=1000 inside the container is not uid 1000 on the host, and files written
+# to a bind mount end up owned by an unknown user (or the write is refused).
+# keep-id maps your own uid to the same number inside the container, which makes
+# PUID/PGID mean exactly what they mean under Docker.
+#
+# Not for Docker: it rejects "keep-id" as a user namespace mode.
+services:
+  bw-export:
+    userns_mode: keep-id
+    # keep-id also makes your uid the default user, but the entrypoint has to
+    # start as root to apply PUID/PGID before dropping to that user.
+    user: "0:0"
