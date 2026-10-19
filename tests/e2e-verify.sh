@@ -49,7 +49,11 @@ docker logs "$NAME" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 [ "$code" = 0 ] || fail "container exited $code, expected 0"
 compgen -G 'e2e/data/*/bitwarden_encrypted_export_*.json'     >/dev/null || fail "no personal vault export"
 compgen -G 'e2e/data/*/bitwarden_encrypted_org_export_*.json' >/dev/null || fail "no organization export"
-compgen -G 'e2e/att/*/*/*'                                    >/dev/null || fail "no attachment downloaded"
+# The CLI creates each item's attachment folder as 700, owned by the container
+# user. Under rootful Docker (as in CI) that is not the runner's uid, so the host
+# cannot list it: look from a container, which runs as root.
+docker run --rm -v "$PWD/e2e/att:/att:ro,z" --entrypoint find localhost/bw-export:local \
+    /att -mindepth 3 -type f | grep -q . || fail "no attachment downloaded"
 note "clean run OK: personal export, organization export and attachment present"
 
 # Issue #21: the bug only appears when the SAME container runs again after a

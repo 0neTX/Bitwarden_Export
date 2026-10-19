@@ -90,7 +90,13 @@ def request(path, data=None, form=False, token=None):
     try:
         with urllib.request.urlopen(req, context=CTX) as r:
             raw = r.read().decode()
-            return r.status, (json.loads(raw) if raw.strip() else {})
+            if not raw.strip():
+                return r.status, {}
+            try:
+                return r.status, json.loads(raw)
+            except ValueError:
+                # The verification token comes back as bare text, not JSON.
+                return r.status, raw.strip()
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
 
@@ -109,17 +115,30 @@ def main():
         serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
     )
 
+    # Vaultwarden 1.37 dropped the one-step /identity/accounts/register. The
+    # flow is now: ask for an email verification token, then finish with it.
+    # With no SMTP configured, Vaultwarden returns the token in the response.
+    st, token = request(
+        "/identity/accounts/register/send-verification-email",
+        {"email": EMAIL, "name": "E2E Test", "receiveMarketingEmails": False},
+    )
+    if st != 200 or not isinstance(token, str) or not token:
+        sys.exit("register (verification token) failed: %s %r" % (st, token))
+
     st, body = request(
-        "/identity/accounts/register",
+        "/identity/accounts/register/finish",
         {
             "email": EMAIL,
-            "name": "E2E Test",
+            "emailVerificationToken": token,
             "masterPasswordHash": mph,
             "masterPasswordHint": None,
-            "key": enc_string(user_key, senc, smac),
+            "userSymmetricKey": enc_string(user_key, senc, smac),
+            "userAsymmetricKeys": {
+                "publicKey": b64(pub_der),
+                "encryptedPrivateKey": enc_string(priv_der, user_key[:32], user_key[32:]),
+            },
             "kdf": 0,
             "kdfIterations": ITER,
-            "keys": {"publicKey": b64(pub_der), "encryptedPrivateKey": enc_string(priv_der, user_key[:32], user_key[32:])},
         },
     )
     if st not in (200, 204):
