@@ -23,6 +23,7 @@ This simple bash docker image uses the Bitwarden CLI to perform three backup tas
 
 - [x] Securize authentication tokens with [Infisical Vault](#safety-infisical)
 - [x] Receive notification in any platform with [Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/)
+- [x] Passwords never appear on a command line, so other users on the host cannot read them with `ps` ([details](#safety-command-line))
 
 The docker image provides the choice of creating unencrypted export files or password-encrypted export files. Attachments are not encrypted.
 
@@ -123,6 +124,21 @@ You must report the following variables so that the container can authenticate i
 ### Safety
 
 This container is based on an automation of the official [Bitwarden CLI client](https://bitwarden.com/help/cli/). **This script does not save, trace or store any information.** The session is closed after the backup has been performed.
+
+#### Passwords stay off the command line {#safety-command-line}
+
+Every user on the host can read the command line of any process with `ps`,
+including the processes inside a container, with Docker as with Podman. So the
+script never passes a password as an argument to the Bitwarden CLI:
+
+- the master password (`BW_PASSWORD`) reaches `bw unlock` through an environment
+  variable (`--passwordenv`), which only the process owner and root can read;
+- the export password (`EXPORT_PASSWORD`) reaches `bw export` through stdin, by
+  answering the CLI's own password prompt. The prompt is kept out of the log,
+  since it is redrawn once per character and would give away the length.
+
+Nothing has to be configured for this: both variables keep accepting either the
+value or the path of a file holding it.
 
 If you wish you can configure each variable using [docker secrets](https://docs.docker.com/compose/use-secrets/) as in the example [docker-compose.secrets.sample.yml](https://github.com/0neTX/Bitwarden_Export/blob/main/docker-compose.secrets.sample.yml)
 

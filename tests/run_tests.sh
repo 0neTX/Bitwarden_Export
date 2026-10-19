@@ -16,7 +16,7 @@ pass=0; fail=0
 setup() {
   unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR \
         BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS \
-        BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST BW_FAIL_LIST
+        BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST BW_FAIL_LIST EXP BW_EXPORT_NOFILE
   rm -rf "$SP/sbx"; mkdir -p "$SP/sbx/out" "$SP/sbx/att"
   export BW_STATE="$SP/sbx/state" BW_CALLLOG="$SP/sbx/calls"
   : > "$BW_CALLLOG"
@@ -28,7 +28,7 @@ run() {
       OUTPUT_PATH="$SP/sbx/out" ATTACHMENTS_PATH="$SP/sbx/att" \
       BW_URL_SERVER="https://vw.example.com" \
       BW_CLIENTID=id BW_CLIENTSECRET=secret BW_PASSWORD="${PW:-correct-pw}" \
-      EXPORT_PASSWORD=exp
+      EXPORT_PASSWORD="${EXP-exp}" BW_EXPORT_PWLOG="$SP/sbx/pwlog"
     bash "$SCRIPT" ) > "$SP/sbx/output" 2>&1
   echo $?
 }
@@ -382,6 +382,51 @@ check "says it could not list" "$(grep -q 'Could not list the organizations' "$S
 check "no 'No organizational vault exists'" "$(! grep -q 'No organizational vault exists' "$SP/sbx/output"; echo $?)" "claimed there are none"
 check "no 'Have a good day'" "$(! grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "reported success anyway"
 unset BW_FAIL_LIST
+echo "=== T31: neither password reaches a command line (ps shows those to every user) ==="
+setup ""
+# Spaces, quotes, a dollar sign and a backslash: each would break or be expanded
+# by a careless hand-off. The mock logs every argv it is given.
+export PW=' master "pw" $HOME \x ' BW_REAL_PW=' master "pw" $HOME \x ' \
+       EXP=" export 'pw' \$PATH \\y " BW_ORGANIZATIONS_LIST=o1
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(tail -4 "$SP/sbx/output")"
+check "master password in no argv" "$(! grep -qF 'master "pw"' "$SP/sbx/calls"; echo $?)" "$(grep -F 'master "pw"' "$SP/sbx/calls")"
+check "export password in no argv" "$(! grep -qF "export 'pw'" "$SP/sbx/calls"; echo $?)" "$(grep -F "export 'pw'" "$SP/sbx/calls")"
+check "unlock takes it from the environment" "$(grep -q '^bw unlock --passwordenv ' "$SP/sbx/calls"; echo $?)" "$(grep '^bw unlock' "$SP/sbx/calls")"
+check "personal export got the exact password" "$(grep -qxF "personal	$EXP" "$SP/sbx/pwlog"; echo $?)" "pwlog: $(cut -f1 "$SP/sbx/pwlog")"
+check "organization export got it too" "$(grep -qxF "o1	$EXP" "$SP/sbx/pwlog"; echo $?)" "pwlog: $(cut -f1 "$SP/sbx/pwlog")"
+check "both files written" "$([ "$(find "$SP/sbx/out" -name 'export-*.json' | wc -l)" = 2 ]; echo $?)" "$(find "$SP/sbx/out" -type f)"
+check "no password prompt in the log" "$(! grep -q 'Export file password' "$SP/sbx/output"; echo $?)" "prompt redraws leak the length"
+check "the internal variable does not outlive unlock" "$(! grep -q 'BW_EXPORT_UNLOCK_PASSWORD=' "$SP/sbx/output"; echo $?)" "leaked"
+
+echo "=== T32: BW_PASSWORD and EXPORT_PASSWORD as files still work ==="
+setup ""
+printf '%s\n' 'file-master-pw' > "$SP/sbx/bwpw"; printf '%s\n' 'file-export-pw' > "$SP/sbx/exppw"
+export PW="$SP/sbx/bwpw" BW_REAL_PW=file-master-pw EXP="$SP/sbx/exppw"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(tail -4 "$SP/sbx/output")"
+check "export got the file's password, not its path" "$(grep -qxF 'personal	file-export-pw' "$SP/sbx/pwlog"; echo $?)" "pwlog: $(cut -f1 "$SP/sbx/pwlog")"
+check "neither password in argv" "$(! grep -q 'file-master-pw\|file-export-pw' "$SP/sbx/calls"; echo $?)" "$(grep 'file-' "$SP/sbx/calls")"
+
+echo "=== T33: an export the CLI reports as fine but never wrote is a failure ==="
+setup ""
+# What the real CLI does when the password prompt reads nothing: exit 0, no file.
+export BW_REAL_PW=correct-pw BW_EXPORT_NOFILE=personal BW_ORGANIZATIONS_LIST=o1
+rc=$(run)
+check "exit 1 (incomplete backup)" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says no file was saved" "$(grep -q 'ERROR: The CLI reported no saved file for the personal vault' "$SP/sbx/output"; echo $?)" "$(tail -6 "$SP/sbx/output")"
+check "counts it" "$(grep -q 'but 1 vault export(s) failed' "$SP/sbx/output"; echo $?)" "$(tail -4 "$SP/sbx/output")"
+check "the organization was still exported" "$(compgen -G "$SP/sbx/out/*/export-o1.json" >/dev/null; echo $?)" "$(find "$SP/sbx/out" -type f)"
+
+echo "=== T34: without EXPORT_PASSWORD the export is unencrypted and prompts for nothing ==="
+setup ""
+export BW_REAL_PW=correct-pw EXP=""
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(tail -4 "$SP/sbx/output")"
+check "plain json export" "$(grep -q '^bw export --format json --output ' "$SP/sbx/calls"; echo $?)" "$(grep '^bw export' "$SP/sbx/calls")"
+check "no --password flag" "$(! grep -q '^bw export.*--password' "$SP/sbx/calls"; echo $?)" "$(grep '^bw export' "$SP/sbx/calls")"
+check "export written" "$(exported; echo $?)" "no export file"
+
 echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
 setup ""
 # The legacy /var/attachment fallback hinges on this, and rootful Docker cannot

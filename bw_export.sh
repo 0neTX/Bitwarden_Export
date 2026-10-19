@@ -244,7 +244,11 @@ fi
 
 #Unlock the vault
 echo "$(date '+%F %T') Unlocking the vault..."
-session_key=$(bw unlock "$bw_password" --raw)
+# Neither password goes on a command line: any user on the host can read a
+# container process's arguments with ps, but only its owner and root can read its
+# environment or its stdin. A dedicated variable rather than BW_PASSWORD, which
+# may hold a file path instead of the password.
+session_key=$(BW_EXPORT_UNLOCK_PASSWORD="$bw_password" bw unlock --passwordenv BW_EXPORT_UNLOCK_PASSWORD --raw)
 unlock_result=$?
 #Verify that unlock succeeded
 if [[ $unlock_result -ne 0 ]] || [[ -z $session_key ]]; then
@@ -296,10 +300,28 @@ exports_failed=0
 # attachments exist", and the run skipped that part of the backup in silence.
 listings_failed=0
 # $1: what is being exported, for the log. The rest: the bw export arguments.
+# With a password, --password goes last and with no value: the CLI then prompts
+# for it and reads the answer from stdin. The prompt is redrawn once per
+# character, which would put the password's length in the log, so it is dropped.
+# The CLI exits 0 without writing anything if that read comes back empty, so the
+# file it reports as saved is checked too.
 run_export() {
-    local what="$1"
+    local what="$1" saved rc=0 errlog
     shift
-    if ! bw export "$@"; then
+    if [[ -n "$password1" ]]; then
+        errlog=$(mktemp)
+        saved=$(printf '%s\n' "$password1" | bw export "$@" --password 2>"$errlog") || rc=$?
+        grep -v 'Export file password' "$errlog" >&2
+        rm -f "$errlog"
+    else
+        saved=$(bw export "$@") || rc=$?
+    fi
+    [[ -n "$saved" ]] && echo "$saved"
+    if [[ $rc -eq 0 ]] && [[ ! -s "$(sed -n 's/^Saved //p' <<<"$saved" | tail -n 1)" ]]; then
+        rc=1
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: The CLI reported no saved file for the $what."
+    fi
+    if [[ $rc -ne 0 ]]; then
         exports_failed=$((exports_failed + 1))
         echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to export the $what."
     fi
@@ -312,7 +334,7 @@ if [[ $password1 == "" ]]; then
 else
     echo
     echo "$(date '+%F %T') Exporting personal vault to a password-encrypted file..."
-    run_export "personal vault" --format encrypted_json --password "$password1" --output "$runtime_save_folder"
+    run_export "personal vault" --format encrypted_json --output "$runtime_save_folder"
 fi
 
 if [[ $organization_list == "" ]]; then
@@ -341,7 +363,7 @@ if [[ -n "$organization_list" ]]; then
         else
             echo
             echo "$(date '+%F %T') Exporting organization vault to a password-encrypted file..."
-            run_export "organization vault $org_id" --organizationid "$org_id" --format encrypted_json --password "$password1" --output "$runtime_save_folder"
+            run_export "organization vault $org_id" --organizationid "$org_id" --format encrypted_json --output "$runtime_save_folder"
         fi
     done
 elif [[ $listings_failed -eq 0 ]]; then

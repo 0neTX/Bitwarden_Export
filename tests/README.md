@@ -2,7 +2,7 @@
 
 Two layers:
 
-- **`run_tests.sh`** — 116 assertions against `bw_export.sh` using a stateful mock
+- **`run_tests.sh`** — 136 assertions against `bw_export.sh` using a stateful mock
   of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers.
 - **`run_ping_tests.sh`** — 33 assertions against the `PING_URL` helpers in
   `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
@@ -19,18 +19,21 @@ Two layers:
 SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
 ```
 
-Expect `PASS=116 FAIL=0`. The suite is only worth anything if it fails on the
+Expect `PASS=136 FAIL=0`. The suite is only worth anything if it fails on the
 code it was written against, so as a control:
 
 ```bash
 git show 57aa29d:bw_export.sh > /tmp/orig.sh       # before the #21 fixes
-SCRIPT=/tmp/orig.sh bash tests/run_tests.sh        # PASS=48 FAIL=62
+SCRIPT=/tmp/orig.sh bash tests/run_tests.sh        # PASS=61 FAIL=69
 
 git show ae34553:bw_export.sh > /tmp/preattach.sh  # #21 fixed, attachments not yet
-SCRIPT=/tmp/preattach.sh bash tests/run_tests.sh   # PASS=64 FAIL=46
+SCRIPT=/tmp/preattach.sh bash tests/run_tests.sh   # PASS=77 FAIL=53
 
 git show 5b24f6e:bw_export.sh > /tmp/preexport.sh  # vault exports not yet checked
-SCRIPT=/tmp/preexport.sh bash tests/run_tests.sh   # PASS=89 FAIL=21
+SCRIPT=/tmp/preexport.sh bash tests/run_tests.sh   # PASS=102 FAIL=28
+
+git show 7346c9d:bw_export.sh > /tmp/preargv.sh    # passwords still on the command line
+SCRIPT=/tmp/preargv.sh bash tests/run_tests.sh     # PASS=129 FAIL=7
 ```
 
 T15–T19 cover the attachment block: the guard that never fired, and the fact
@@ -45,6 +48,16 @@ backups: the failed run's empty folder counted as the newest one. T28 is the
 control that a full set of successful exports still exits 0. T29–T30 cover a
 listing the CLI refuses, as it does once a 401 has logged it out: that is not an
 empty vault, and must not be reported as "No attachments exist".
+T31–T34 cover how the passwords reach the CLI. A process's command line is
+readable by every user on the host (`ps`), so the master password goes to
+`bw unlock` through an environment variable and the export password to
+`bw export --password` through stdin, where the CLI's prompt reads it. The mock
+logs every argv and the password each export received, so the tests check both
+that neither password appears in an argv and that the export got it byte for
+byte, spaces and quotes included, also when it comes from a file. The prompt
+is redrawn once per character, so it is kept out of the log. T33 covers what the
+CLI does when that read comes back empty: exit 0 and no file, which must count
+as a failed export. T34 checks that an unencrypted export prompts for nothing.
 TM covers how the legacy `/var/attachment` fallback tells an anonymous volume
 from a real mount, using mountinfo lines in the formats of rootful Docker and
 rootless Podman. Against a script without the function it fails once.
