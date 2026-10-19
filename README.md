@@ -37,6 +37,8 @@ This docker image requires the following:
 
 - [Docker](https://docker.com) (Obviously)
 - Personal API Keys for CLI Authentication <a href="https://bitwarden.com/help/personal-api-key/" target="_blank">https://bitwarden.com/help/personal-api-key/</a>
+- A self-hosted server reachable over **HTTPS**: the Bitwarden CLI refuses plain-HTTP URLs.
+- **Vaultwarden 1.37.4 or later.** The bundled Bitwarden CLI (2026.10.0) calls an endpoint that older Vaultwarden releases do not have, and the export then fails with `Failed to unlock vault with BW_PASSWORD` even though the password is right ([vaultwarden#7693](https://github.com/dani-garcia/vaultwarden/pull/7693)). bitwarden.com is not affected.
 
 ## How to Use the docker image
 
