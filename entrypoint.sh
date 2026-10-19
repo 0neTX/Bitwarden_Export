@@ -9,6 +9,8 @@ Cyan='\033[0;36m'         # Cyan
 # other tells a machine, and neither is consulted to decide the other.
 # shellcheck source=root/usr/local/lib/bw-export/ping.sh
 . /usr/local/lib/bw-export/ping.sh
+# shellcheck source=root/usr/local/lib/bw-export/notify.sh
+. /usr/local/lib/bw-export/notify.sh
 
 # Reporting the outcome from a trap is what covers every exit path, including
 # the Infisical check below, which exits on its own. Running last also makes the
@@ -26,15 +28,15 @@ ping_on_exit() {
 }
 trap ping_on_exit EXIT
 
+# The failure notification: the end of the run log.
 send_notification () {
-    set -xe
-    echo -e "\n${Cyan}Notification enabled: $NOTIFICATION_URL "
-    /app/shoutrrr send -m "$(tail -n 15 "$logfile")"  -u "$NOTIFICATION_URL"
+    send_message "$(tail -n 15 "$logfile" 2>/dev/null)"
 }
 
 if [[ -n "${NOTIFICATION_URL}" ]]; then
-    /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Started"  -u "$NOTIFICATION_URL"
+    echo -e "\n${Cyan}Notifications enabled."
 fi
+send_message "Bitwarden/Vaultwarden Export: Started"
 
 # Before the Infisical check below, so a failure there reads as start then fail
 # rather than as silence.
@@ -45,15 +47,25 @@ command="su bitwarden -c /app/bw_export.sh "
 logfile=/app/bw-export-logfile.log
 
 if [[ -n "${INFISICAL_TOKEN}" ]]; then
+    # An array, so that no INFISICAL_PATH means no argument at all. A quoted
+    # empty string reaches Infisical as an argument, which it rejects, so the
+    # check below failed whenever INFISICAL_PATH was not set.
+    infisical_args=()
     if [[ -n "${INFISICAL_PATH}" ]]; then
         infisicalpath="--path=${INFISICAL_PATH}"
+        infisical_args=("$infisicalpath")
     fi
     echo -e "\n${Yellow}Infisical enabled! "
     #Run this command to test connection with Infiscal
-    infisical run "$infisicalpath" --command="echo BW_CLIENTID:$BW_CLIENTID"
+    infisical_output=$(infisical run "${infisical_args[@]}" --command="echo BW_CLIENTID:$BW_CLIENTID" 2>&1)
     returncode=$?
-    if [[ -n "${NOTIFICATION_URL}" ]]  &&  [[ "$returncode" -ne "0" ]]; then
-        send_notification
+    echo "$infisical_output"
+    # Stop here whether or not notifications are on: without the secrets the
+    # export cannot run. The run log does not exist yet, so the message says
+    # what failed and carries Infisical's own last lines.
+    if [[ "$returncode" -ne "0" ]]; then
+        send_message "Bitwarden/Vaultwarden Export: Failed ❌ Infisical could not provide the secrets (exit $returncode). Check INFISICAL_TOKEN and INFISICAL_PATH.
+$(tail -n 5 <<<"$infisical_output")"
         exit 1
     fi
     command="infisical run $infisicalpath --command='$command'"
@@ -105,12 +117,10 @@ done
 trap - TERM INT
 echo Return Code: $return
 
-if [[ -n "${NOTIFICATION_URL}" ]]; then
-    if [[ "$return" -ne "0" ]]; then
-        send_notification || true
-    else
-        /app/shoutrrr send -m "Bitwarden/Vaultwarden Export: Successfully completed ✅"  -u "$NOTIFICATION_URL" || true
-    fi
+if [[ "$return" -ne "0" ]]; then
+    send_notification
+else
+    send_message "Bitwarden/Vaultwarden Export: Successfully completed ✅"
 fi
 
 # Report what the export actually did. Without this the container always exited
