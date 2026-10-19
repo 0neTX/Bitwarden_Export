@@ -161,6 +161,10 @@ echo BW_PASSWORD  > ./.secrets/.bwpassword
 
 - Edit Docker compose and add the variables `INFISICAL_TOKEN` with previous generated token and `INFISICAL_PATH` with *Secrets Path* value
 
+> A service token carries its own environment and *Secrets Path*, and Infisical always applies them: `INFISICAL_PATH` cannot point a service token anywhere else, and a wrong value is not reported as an error. If the export runs with the wrong secrets, check the token's scope in Infisical, not `INFISICAL_PATH`.
+>
+> When the same variable is set both in the compose file and in Infisical, the Infisical value is used.
+
 ![compose sample](docs/assets/infisical4.png)
 
 ### Notification in Telegram
