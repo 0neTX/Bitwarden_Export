@@ -95,7 +95,7 @@ RUN echo "${SHOUTRRR_SHA256}  shoutrrr.tar.gz" | sha256sum -c - && \
 # Installing BW_CLI_VERSION version of Bitwarden CLI.
 # ARG so a build can override it (--build-arg BW_CLI_VERSION=...), ENV so the
 # version stays readable in the image. The default is the pinned, tested one.
-ARG BW_CLI_VERSION="2026.8.0"
+ARG BW_CLI_VERSION="2026.10.0"
 ENV BW_CLI_VERSION="${BW_CLI_VERSION}"
 ADD https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}/bw-linux-${BW_CLI_VERSION}.zip /tmp/bw.zip
 
