@@ -368,8 +368,13 @@ if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]];
     # The loop runs in this shell (process substitution, not a pipe), so the
     # count survives it. A failed download is only reported by the CLI's exit
     # status; on stdout it looks much like a successful one.
+    # The CLI ends its "Saved <path>" without a newline, which ran every
+    # attachment into one line, so it is captured and printed with one.
     while IFS=$'\t' read -r item_id file_name output_dir; do
-        if ! bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir"; then
+        rc=0
+        saved=$(bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir") || rc=$?
+        [[ -n "$saved" ]] && printf '%s\n' "$saved"
+        if [[ $rc -ne 0 ]]; then
             attachments_failed=$((attachments_failed + 1))
         fi
     done < <(jq -r --arg dir "$runtime_save_folder_attachments" '

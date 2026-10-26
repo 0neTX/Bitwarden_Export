@@ -96,6 +96,8 @@ case "$1" in
         exit 1
       fi
       mkdir -p "$out" && printf 'attachment-content\n' > "$out/$file"
+      # Like the real CLI: the confirmation has no trailing newline.
+      printf 'Saved %s' "${out%/}/$file"
     fi
     exit 0 ;;
   export)
