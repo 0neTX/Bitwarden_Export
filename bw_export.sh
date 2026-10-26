@@ -146,10 +146,16 @@ else
 fi
 
 #Set Organization ID (if applicable)
-if [[ -z "${BW_ORGANIZATIONS_LIST}" ]]; then
-    echo -e "\n$(date '+%F %T') ${Cyan} BW_ORGANIZATIONS_LIST enviroment not provided. All detected organizations will be exported. "
-else
-    organization_list="${BW_ORGANIZATIONS_LIST}"
+# "none", in any case and with any spacing, exports no organization at all.
+organization_list="${BW_ORGANIZATIONS_LIST}"
+organizations_none=0
+organizations_setting=${BW_ORGANIZATIONS_LIST//[[:space:]]/}
+if [[ ${organizations_setting,,} == none ]]; then
+    organizations_none=1
+    organization_list=""
+    echo -e "\n$(date '+%F %T') ${Cyan}Info: BW_ORGANIZATIONS_LIST is none. No organization will be exported."
+elif [[ -z "${BW_ORGANIZATIONS_LIST}" ]]; then
+    echo -e "\n$(date '+%F %T') ${Cyan} BW_ORGANIZATIONS_LIST enviroment not provided. Every organization you own or administer will be exported. "
 fi
 
 #Check export password
@@ -337,41 +343,7 @@ else
     run_export "personal vault" --format encrypted_json --output "$runtime_save_folder"
 fi
 
-if [[ $organization_list == "" ]]; then
-    if ! orgs_json=$(bw list organizations); then
-        listings_failed=$((listings_failed + 1))
-        orgs_json='[]'
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not list the organizations, so none were exported."
-    fi
-    list=$(jq -r '.[] | .id' <<<"$orgs_json" | tr '\n' ', ')
-    if [[ -n "$list" ]]; then
-        organization_list=${list::-1}
-        if [[ -n "$organization_list" ]]; then
-            echo -e "\n$(date '+%F %T') ${Cyan}Info: No  BW_ORGANIZATIONS_LIST provided. Exporting all organizations detected in vault"
-        fi
-    fi
-fi
-
-# 2. Export the organization vault (if specified)
-if [[ -n "$organization_list" ]]; then
-    IFS=', ' read -r -a array <<<"$organization_list"
-    for org_id in "${array[@]}"; do
-        if [[ $password1 == "" ]]; then
-            echo
-            echo "$(date '+%F %T') Exporting organization vault to an unencrypted file..."
-            run_export "organization vault $org_id" --organizationid "$org_id" --format json --output "$runtime_save_folder"
-        else
-            echo
-            echo "$(date '+%F %T') Exporting organization vault to a password-encrypted file..."
-            run_export "organization vault $org_id" --organizationid "$org_id" --format encrypted_json --output "$runtime_save_folder"
-        fi
-    done
-elif [[ $listings_failed -eq 0 ]]; then
-    echo
-    echo "$(date '+%F %T') No organizational vault exists, so nothing to export."
-fi
-
-# 3. Download all attachments (file backup)
+# 2. Download all attachments (file backup)
 # Item and file names are attacker-controlled: anyone who can put an item in a
 # shared organization collection chooses them. They are therefore passed to the
 # CLI as arguments and never interpolated into shell text.
@@ -419,20 +391,115 @@ elif [[ $items_listed -eq 1 ]]; then
     echo "$(date '+%F %T') No attachments exist, so nothing to export."
 fi
 
-echo
-if [[ $((exports_failed + listings_failed)) -gt 0 ]]; then
-    echo -e "$(date '+%F %T') ${IYellow}ERROR: $exports_failed vault export(s) and $listings_failed vault listing(s) failed."
-else
-    echo "$(date '+%F %T') Vault export complete."
-fi
-
-# 4. Report items in the Trash (cannot be exported)
+# 3. Report items in the Trash (cannot be exported)
 trash_count=$(bw list items --trash | jq -r '. | length')
 
 if [[ $trash_count -gt 0 ]]; then
 
     echo -e "\n$(date '+%F %T') ${Cyan}Info: You have $trash_count items in the trash that cannot be exported."
 
+fi
+
+# 4. Export the organization vaults
+# They go last because the CLI logs itself out when the server rejects one, and
+# everything after that fails with "You are not logged in." When they ran
+# before the attachments, an organization the account could never export took
+# the attachments down with it.
+#
+# Only a confirmed Owner or Admin can export an organization: Vaultwarden
+# answers anyone else with a 401. The CLI does not show a custom role's
+# permissions, and Vaultwarden reports its managers as custom, so a detected
+# organization is exported for those two roles only. One named in
+# BW_ORGANIZATIONS_LIST is always tried.
+# blocker: why this account cannot export the organization, empty if it can.
+# A role or status the CLI does not report as a number is not ours to judge, so
+# that organization is tried, as it always was.
+org_export_blocker='def blocker:
+    if (.status | type) != "number" or (.type | type) != "number" then ""
+    elif .status == -1 then "your access to it is revoked"
+    elif .status != 2 then "your membership is not confirmed"
+    elif .type == 0 or .type == 1 then ""
+    elif .type == 4 then "the CLI cannot tell whether your role (Custom) may export it"
+    else "your role (\({"2": "User", "3": "Manager"}[.type | tostring] // "type \(.type)")) cannot export it"
+    end;'
+orgs_json='[]'
+orgs_listed=0
+organizations_skipped=0
+if [[ $organizations_none -eq 1 ]]; then
+    :
+elif [[ $organization_list == "" ]]; then
+    # Anything but a JSON array is a failed listing, not an empty one.
+    if orgs_json=$(bw list organizations) && jq -e 'type == "array"' >/dev/null 2>&1 <<<"$orgs_json"; then
+        orgs_listed=1
+    else
+        listings_failed=$((listings_failed + 1))
+        orgs_json='[]'
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not list the organizations, so none were exported."
+    fi
+    # The name is chosen by the organization's owner, so control characters are
+    # replaced and it is printed with %s, never interpreted.
+    while IFS=$'\t' read -r org_id org_verdict org_name org_reason; do
+        if [[ $org_verdict == export ]]; then
+            organization_list+="${organization_list:+,}$org_id"
+        else
+            organizations_skipped=$((organizations_skipped + 1))
+            printf '\n%s %bInfo: Skipping organization "%s" (%s): %s.\n' \
+                "$(date '+%F %T')" "$Cyan" "$org_name" "$org_id" "$org_reason"
+            if [[ $org_verdict == custom ]]; then
+                echo "$(date '+%F %T') If it may, add its ID to BW_ORGANIZATIONS_LIST."
+            fi
+        fi
+    done < <(jq -r "$org_export_blocker"'
+        .[] | blocker as $why
+        | (.name // "" | gsub("[[:cntrl:]]"; "_")) as $name
+        | [ .id,
+            (if $why == "" then "export" elif .type == 4 then "custom" else "skip" end),
+            (if $name == "" then "(unnamed)" else $name end),
+            $why ]
+        | join("\t")' <<<"$orgs_json")
+    if [[ -n "$organization_list" ]]; then
+        echo -e "\n$(date '+%F %T') ${Cyan}Info: No  BW_ORGANIZATIONS_LIST provided. Exporting every organization you own or administer"
+    fi
+else
+    # Here the listing only explains a failed export, so failing is not an error.
+    orgs_json=$(bw list organizations 2>/dev/null) || orgs_json='[]'
+fi
+
+if [[ -n "$organization_list" ]]; then
+    IFS=', ' read -r -a array <<<"$organization_list"
+    for org_id in "${array[@]}"; do
+        failed_before=$exports_failed
+        if [[ $password1 == "" ]]; then
+            echo
+            echo "$(date '+%F %T') Exporting organization vault to an unencrypted file..."
+            run_export "organization vault $org_id" --organizationid "$org_id" --format json --output "$runtime_save_folder"
+        else
+            echo
+            echo "$(date '+%F %T') Exporting organization vault to a password-encrypted file..."
+            run_export "organization vault $org_id" --organizationid "$org_id" --format encrypted_json --output "$runtime_save_folder"
+        fi
+        if [[ $exports_failed -gt $failed_before ]]; then
+            org_reason=$(jq -r --arg id "$org_id" "$org_export_blocker"'
+                first(.[] | select(.id == $id) | blocker) // ""' <<<"$orgs_json" 2>/dev/null) || org_reason=""
+            if [[ -n "$org_reason" ]]; then
+                echo "$(date '+%F %T') Hint: $org_reason. Only a confirmed Owner or Admin, or a custom role allowed to, can export an organization."
+                echo "$(date '+%F %T') Remove it from BW_ORGANIZATIONS_LIST."
+            fi
+        fi
+    done
+elif [[ $organizations_skipped -gt 0 ]]; then
+    echo
+    echo "$(date '+%F %T') None of your organizations can be exported with your role, so none were exported."
+elif [[ $orgs_listed -eq 1 ]]; then
+    echo
+    echo "$(date '+%F %T') No organizational vault exists, so nothing to export."
+fi
+
+echo
+if [[ $((exports_failed + listings_failed)) -gt 0 ]]; then
+    echo -e "$(date '+%F %T') ${IYellow}ERROR: $exports_failed vault export(s) and $listings_failed vault listing(s) failed."
+else
+    echo "$(date '+%F %T') Vault export complete."
 fi
 
 echo

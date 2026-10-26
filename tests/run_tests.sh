@@ -16,7 +16,8 @@ pass=0; fail=0
 setup() {
   unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR \
         BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS \
-        BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST BW_FAIL_LIST EXP BW_EXPORT_NOFILE
+        BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST BW_FAIL_LIST EXP BW_EXPORT_NOFILE \
+        BW_ORGS_JSON BW_DENY_EXPORT
   rm -rf "$SP/sbx"; mkdir -p "$SP/sbx/out" "$SP/sbx/att"
   export BW_STATE="$SP/sbx/state" BW_CALLLOG="$SP/sbx/calls"
   : > "$BW_CALLLOG"
@@ -426,6 +427,95 @@ check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(tail -4 "$SP/sbx/output")"
 check "plain json export" "$(grep -q '^bw export --format json --output ' "$SP/sbx/calls"; echo $?)" "$(grep '^bw export' "$SP/sbx/calls")"
 check "no --password flag" "$(! grep -q '^bw export.*--password' "$SP/sbx/calls"; echo $?)" "$(grep '^bw export' "$SP/sbx/calls")"
 check "export written" "$(exported; echo $?)" "no export file"
+
+echo "=== T35: a detected organization the account cannot export is skipped, not failed ==="
+# The reported case: a plain member (User) of someone else's organization. The
+# server answers its export with a 401 and the CLI then logs itself out.
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach" \
+       BW_ORGS_JSON='[{"id":"o-fam","name":"Familia","status":2,"type":2}]' BW_DENY_EXPORT=o-fam
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(grep -i 'error\|organi' "$SP/sbx/output")"
+check "not attempted" "$(! grep -q '^bw export --organizationid' "$BW_CALLLOG"; echo $?)" "$(grep '^bw export' "$BW_CALLLOG")"
+check "says why, by name" "$(grep -q 'Skipping organization "Familia" (o-fam): your role (User) cannot export it' "$SP/sbx/output"; echo $?)" "$(grep -i 'organi' "$SP/sbx/output")"
+check "not 'No organizational vault exists'" "$(! grep -q 'No organizational vault exists' "$SP/sbx/output"; echo $?)" "claimed there are none"
+check "attachments saved" "$(compgen -G "$SP/sbx/att/*/Doc/a.pdf" >/dev/null; echo $?)" "$(find "$SP/sbx/att" -type f)"
+check "personal vault saved" "$(exported; echo $?)" "no export file"
+
+echo "=== T36: only a confirmed Owner or Admin has a detected organization exported ==="
+setup ""
+# Vaultwarden reports its managers as Custom, and the CLI does not show a custom
+# role's permissions, so Custom is skipped too. The last name carries an escape
+# character and a literal \n: neither may reach the log as such.
+export BW_REAL_PW=correct-pw BW_ORGS_JSON='[
+  {"id":"o0","name":"Own","status":2,"type":0}, {"id":"o1","name":"Adm","status":2,"type":1},
+  {"id":"o2","name":"Usr","status":2,"type":2}, {"id":"o3","name":"Mgr","status":2,"type":3},
+  {"id":"o4","name":"Cus","status":2,"type":4}, {"id":"o5","name":"Acc","status":1,"type":0},
+  {"id":"o6","name":"Rev\u001b[31m\\n","status":-1,"type":1}]'
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "Owner and Admin exported" "$([ "$(grep -c '^bw export --organizationid' "$BW_CALLLOG")" = 2 ] && grep -q '^bw export --organizationid o0 ' "$BW_CALLLOG" && grep -q '^bw export --organizationid o1 ' "$BW_CALLLOG"; echo $?)" "$(grep '^bw export --org' "$BW_CALLLOG")"
+check "five skipped" "$([ "$(grep -c 'Skipping organization' "$SP/sbx/output")" = 5 ]; echo $?)" "$(grep 'Skipping' "$SP/sbx/output")"
+check "Manager named" "$(grep -q '(o3): your role (Manager) cannot export it' "$SP/sbx/output"; echo $?)" "$(grep 'o3' "$SP/sbx/output")"
+check "Custom named, with the way out" "$(grep -q '(o4): the CLI cannot tell whether your role (Custom) may export it' "$SP/sbx/output" && grep -A1 '(o4)' "$SP/sbx/output" | grep -q 'add its ID to BW_ORGANIZATIONS_LIST'; echo $?)" "$(grep -A1 'o4' "$SP/sbx/output")"
+check "unconfirmed named" "$(grep -q '(o5): your membership is not confirmed' "$SP/sbx/output"; echo $?)" "$(grep 'o5' "$SP/sbx/output")"
+check "revoked named" "$(grep -q '(o6): your access to it is revoked' "$SP/sbx/output"; echo $?)" "$(grep 'o6' "$SP/sbx/output")"
+check "a name cannot write escapes into the log" "$(grep -qF '"Rev_[31m\n" (o6)' "$SP/sbx/output" && ! grep -q $'\e\\[31m' "$SP/sbx/output"; echo $?)" "$(grep 'o6' "$SP/sbx/output" | od -c | head -3)"
+
+echo "=== T37: an organization named in BW_ORGANIZATIONS_LIST is tried, and a refusal explained ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach" BW_ORGANIZATIONS_LIST=o-fam KEEP_LAST_BACKUPS=1 \
+       BW_ORGS_JSON='[{"id":"o-fam","name":"Familia","status":2,"type":2}]' BW_DENY_EXPORT=o-fam
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+mkdir -p "$SP/sbx/out/20200101000000-bw-export" "$SP/sbx/out/20200102000000-bw-export"
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "attempted" "$(grep -q '^bw export --organizationid o-fam ' "$BW_CALLLOG"; echo $?)" "$(grep '^bw export' "$BW_CALLLOG")"
+check "hint names the role" "$(grep -q 'Hint: your role (User) cannot export it' "$SP/sbx/output" && grep -q 'Remove it from BW_ORGANIZATIONS_LIST' "$SP/sbx/output"; echo $?)" "$(grep -A2 'Failed to export' "$SP/sbx/output")"
+# The refusal logs the CLI out. Run before it, the attachments survive it.
+check "attachments saved before the refusal" "$(compgen -G "$SP/sbx/att/*/Doc/a.pdf" >/dev/null; echo $?)" "$(grep -i 'attach\|not logged' "$SP/sbx/output")"
+check "no listing failure" "$(grep -q '1 vault export(s) and 0 vault listing(s) failed' "$SP/sbx/output"; echo $?)" "$(grep 'failed' "$SP/sbx/output")"
+check "old backups kept" "$([ -d "$SP/sbx/out/20200101000000-bw-export" ] && [ -d "$SP/sbx/out/20200102000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
+
+echo "=== T37b: a role or status the CLI does not report as a number is tried, as before ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ORGS_JSON='[{"id":"o0","name":"NoRole"},{"id":"o1","name":"Str","status":"Confirmed","type":"User"}]'
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "both attempted" "$([ "$(grep -c '^bw export --organizationid' "$BW_CALLLOG")" = 2 ]; echo $?)" "$(grep '^bw export --org' "$BW_CALLLOG")"
+check "nothing skipped" "$(! grep -q 'Skipping organization' "$SP/sbx/output"; echo $?)" "$(grep 'Skipping' "$SP/sbx/output")"
+
+echo "=== T37c: an organizations listing that is not JSON is a failed listing ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ORGS_JSON='Could not find data file; creating it instead.'
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says it could not list" "$(grep -q 'Could not list the organizations' "$SP/sbx/output"; echo $?)" "$(grep -i 'organi' "$SP/sbx/output")"
+check "no 'No organizational vault exists'" "$(! grep -q 'No organizational vault exists' "$SP/sbx/output"; echo $?)" "claimed there are none"
+
+echo "=== T38: an explicit list does not depend on listing the organizations ==="
+setup ""
+# There the listing only feeds the hint, so it failing is not a failed backup.
+export BW_REAL_PW=correct-pw BW_ORGANIZATIONS_LIST=o1 BW_FAIL_LIST=organizations
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(grep -i 'error' "$SP/sbx/output")"
+check "exported" "$(compgen -G "$SP/sbx/out/*/export-o1.json" >/dev/null; echo $?)" "$(find "$SP/sbx/out" -type f)"
+check "no listing error logged" "$(! grep -q 'Could not list\|not logged in' "$SP/sbx/output"; echo $?)" "$(grep -i 'list\|logged' "$SP/sbx/output")"
+
+echo "=== T39: BW_ORGANIZATIONS_LIST=none exports no organization ==="
+for value in none " NoNe "; do
+  setup ""
+  export BW_REAL_PW=correct-pw BW_ORGANIZATIONS_LIST="$value" \
+         BW_ORGS_JSON='[{"id":"o0","name":"Own","status":2,"type":0}]'
+  rc=$(run)
+  check "[$value] exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+  check "[$value] organizations not even listed" "$(! grep -q '^bw list organizations\|^bw export --organizationid' "$BW_CALLLOG"; echo $?)" "$(grep 'organi' "$BW_CALLLOG")"
+  check "[$value] says so" "$(grep -q 'BW_ORGANIZATIONS_LIST is none' "$SP/sbx/output"; echo $?)" "$(grep -i 'organi' "$SP/sbx/output")"
+  check "[$value] personal vault saved" "$(exported; echo $?)" "no export file"
+done
 
 echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
 setup ""
