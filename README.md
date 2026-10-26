@@ -46,7 +46,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 ## Features
 
 - Exports your **personal vault** to JSON, plain or password-encrypted.
-- Exports your **organization vaults** (all of them, or the ones you list).
+- Exports your **organization vaults** (every one you own or administer, or the ones you list).
 - Downloads **file attachments**, one subfolder per vault item. Attachments are never encrypted.
 - Keeps **passwords off the command line**, so other users on the host cannot read them with `ps` ([details](#passwords-stay-off-the-command-line)).
 - Reads its credentials from **Docker secrets** or from **[Infisical](#option-b-infisical)** instead of the compose file.
@@ -143,7 +143,7 @@ The Bitwarden CLI cannot export items in your **Trash** or your **password histo
 | Variable | Default | Description |
 |---|---|---|
 | `BW_URL_SERVER` | bitwarden.com | URL of your self-hosted Vaultwarden/Bitwarden server. Must be HTTPS. |
-| `BW_ORGANIZATIONS_LIST` | all organizations | Comma-separated organization IDs to export. |
+| `BW_ORGANIZATIONS_LIST` | every organization you own or administer | Comma-separated organization IDs to export, or `none` to export no organization. |
 | `OUTPUT_PATH` | `/var/data/` | Where the vault exports are written. The path must exist in the container, normally as a mounted volume. |
 | `ATTACHMENTS_PATH` | `/var/attachments/` | Where the attachments are written, same condition. |
 | `KEEP_LAST_BACKUPS` | keep everything | Keep only the N newest export folders, delete the rest. See [Retention](#retention). |
@@ -338,6 +338,7 @@ On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g. `./export
 |---|---|
 | `Failed to unlock vault with BW_PASSWORD`, but the password is right | Vaultwarden older than 1.37.4. Upgrade the server; see [Requirements](#requirements). |
 | The CLI refuses your server URL | `BW_URL_SERVER` must be HTTPS. Plain HTTP is rejected. |
+| `Failed to export the organization vault`, then `You are not logged in.` | Only a confirmed Owner or Admin, or a custom role allowed to, can export an organization; the server refuses anyone else and the CLI logs itself out. Left unset, `BW_ORGANIZATIONS_LIST` already skips those organizations and logs `Skipping organization`. If you listed one by hand, remove it, or set `BW_ORGANIZATIONS_LIST=none`. |
 | `Could not find the folder in which to save the files` | `OUTPUT_PATH` or `ATTACHMENTS_PATH` points somewhere that is not mounted in the container. |
 | The export works, but no attachments appear on the host | The old `/var/attachment` mount. See [Upgrade notes](#upgrade-notes). |
 | The run uses the wrong secrets with Infisical | The service token's own scope, not `INFISICAL_PATH`. See [Option B](#option-b-infisical). |
@@ -346,6 +347,14 @@ On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g. `./export
 | No notification arrives | A failed notification is logged without the address and does not change the exit code. Check the log and the Shoutrrr URL. |
 
 ## Upgrade notes
+
+### Organizations you do not own or administer
+
+Only a confirmed Owner or Admin, or a custom role allowed to, can export an organization. Without `BW_ORGANIZATIONS_LIST`, the image used to try every organization you belong to, and the server refused the others. The CLI then logged itself out, so the attachments, and any organization tried after it, were lost too. Before 1.12 all of this was reported as a successful backup. Those organizations are now skipped, each one with a `Skipping organization` line in the log.
+
+- **You own or administer every organization you belong to, or you set `BW_ORGANIZATIONS_LIST`:** nothing changes.
+- **You belong to an organization as User or Manager:** the run stops failing, and your attachments and the organizations you do own are saved again. That organization's backup is the job of whoever owns it.
+- **You use bitwarden.com with a Custom role that may export:** the CLI does not show a custom role's permissions, so that organization is no longer exported on its own. Add its ID to `BW_ORGANIZATIONS_LIST`.
 
 ### Attachments path
 

@@ -5,6 +5,8 @@
 #   BW_FAIL_CONFIG/BW_FAIL_LOGIN : force those subcommands to fail
 #   BW_FAIL_EXPORT : "personal" or an organization id whose export fails
 #   BW_FAIL_LIST   : "organizations" or "items", a listing that fails
+#   BW_ORGS_JSON   : what "list organizations" prints (default: [])
+#   BW_DENY_EXPORT : an organization id the server refuses to export (a 401)
 #   BW_EXPORT_PWLOG: file that records, per export, the password the CLI received
 #   BW_EXPORT_NOFILE: "personal" or an organization id whose export exits 0 unwritten
 STATE="${BW_STATE:?}"
@@ -57,6 +59,7 @@ case "$1" in
           auth=0; locked=1; cached_pw=""; server="https://vault.bitwarden.com"; save; exit 0 ;;
 
   list)
+    [ "$auth" = 1 ] || { echo "You are not logged in." >&2; exit 1; }
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
     # BW_FAIL_LIST names a listing (organizations, items) that fails the way it
     # does once a 401 has logged the CLI out.
@@ -64,6 +67,9 @@ case "$1" in
       echo "You are not logged in." >&2; exit 1
     fi
     # "list items --trash" is a different question; only the vault listing is seeded.
+    if [ "$2" = organizations ] && [ -n "${BW_ORGS_JSON:-}" ]; then
+      printf '%s\n' "$BW_ORGS_JSON"; exit 0
+    fi
     if [ "$2" = items ] && [ "$3" != --trash ] && [ -s "${BW_ITEMS_FILE:-}" ]; then
       cat "$BW_ITEMS_FILE"
     else
@@ -93,6 +99,7 @@ case "$1" in
     fi
     exit 0 ;;
   export)
+    [ "$auth" = 1 ] || { echo "You are not logged in." >&2; exit 1; }
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
     [ -n "$BW_SLOW_EXPORT" ] && sleep 5
     org=personal; pw=; prompt=
@@ -111,6 +118,14 @@ case "$1" in
       echo >&2
     fi
     printf '%s\t%s\n' "$org" "$pw" >> "${BW_EXPORT_PWLOG:-/dev/null}"
+    # BW_DENY_EXPORT names an organization the account may not export. The
+    # server answers 401 and the real CLI then logs itself out, so every later
+    # command fails with "You are not logged in."
+    if [ -n "${BW_DENY_EXPORT:-}" ] && [ "$org" = "$BW_DENY_EXPORT" ]; then
+      echo '{"response":{"error":{"code":401,"reason":"Unauthorized"}},"statusCode":401}' >&2
+      auth=0; locked=1; cached_pw=""; save
+      echo "You are not logged in." >&2; exit 1
+    fi
     # BW_FAIL_EXPORT names "personal" or an organization id whose export fails
     # the way the real CLI does on an unwritable folder: one line on stderr,
     # exit 1, nothing written.

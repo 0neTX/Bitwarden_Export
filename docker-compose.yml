@@ -17,7 +17,7 @@ services:
       # - ATTACHMENTS_PATH=<attachment path i.e. /var/attachments/ >
       - EXPORT_PASSWORD=<Export password. Export will be encrypted with this password>
       # Optional: If not provided, the service will export all organizations in vault.
-      # - BW_ORGANIZATIONS_LIST=<Organization list id, comma separated>
+      # - BW_ORGANIZATIONS_LIST=<Organization list id, comma separated, or none>
       # Optional: Execution logging file. Please check output path is mapping inside a volume
       # - FILE_LOG=/var/data/bw-export-logfile.log
       # Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted.
