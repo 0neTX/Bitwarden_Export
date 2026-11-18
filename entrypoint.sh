@@ -193,14 +193,14 @@ fi
 
 # Cron mode: validate the schedule first so a typo fails fast, run an initial
 # backup right away, and hand PID 1 over to supercronic.
-printf '%s %q --run-once\n' "$CRON" "$0" > "$CRONTAB_FILE"
+printf '%s bash %q --run-once\n' "$CRON" "$0" > "$CRONTAB_FILE"
 if ! "$SUPERCRONIC_BIN" -test "$CRONTAB_FILE"; then
     echo -e "\n${Yellow}ERROR: Invalid CRON expression: $CRON" >&2
     exit 1
 fi
 
 echo -e "\n${Cyan}Cron mode enabled ($CRON). Running initial backup..."
-"$0" --run-once &
+bash "$0" --run-once &
 startup_pid=$!
 trap 'kill -TERM "$startup_pid" 2>/dev/null || true; wait "$startup_pid" 2>/dev/null || true; exit 143' TERM
 trap 'kill -INT "$startup_pid" 2>/dev/null || true; wait "$startup_pid" 2>/dev/null || true; exit 130' INT
