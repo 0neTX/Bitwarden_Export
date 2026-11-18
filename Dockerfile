@@ -56,7 +56,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # swallowed (no pipefail under /bin/sh), so bash ran an empty script, exited 0,
 # and the build died two lines later on a misleading "package not found".
 RUN apt-get update && \
-    apt-get install -y bash curl unzip jq wget procps ca-certificates && \
+    apt-get install -y bash curl unzip jq wget procps ca-certificates tzdata && \
     curl -fsSL 'https://artifacts-cli.infisical.com/setup.deb.sh' \
         -o /tmp/infisical-setup.sh && \
     bash /tmp/infisical-setup.sh && \
@@ -91,6 +91,13 @@ RUN echo "${SHOUTRRR_SHA256}  shoutrrr.tar.gz" | sha256sum -c - && \
     mv LICENSE.md shoutrrr-LICENSE.md && \
     chmod +x shoutrrr && \
     rm shoutrrr.tar.gz
+
+# Installing supercronic for optional in-container cron scheduling (CRON env var).
+ARG SUPERCRONIC_VERSION="0.2.51"
+ARG SUPERCRONIC_SHA256="cc232108374e8e2b537045f2d5eaa1229f619db314c3ba6a14d38b35dc0aa123"
+ADD https://github.com/aptible/supercronic/releases/download/v${SUPERCRONIC_VERSION}/supercronic-linux-amd64 /usr/local/bin/supercronic
+RUN echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" | sha256sum -c - && \
+    chmod +x /usr/local/bin/supercronic
 
 # Installing BW_CLI_VERSION version of Bitwarden CLI.
 # ARG so a build can override it (--build-arg BW_CLI_VERSION=...), ENV so the
