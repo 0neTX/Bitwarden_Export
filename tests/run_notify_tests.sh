@@ -78,6 +78,37 @@ msg=$'line one\nline "two" $HOME `x`\n'
 ( NOTIFICATION_URL="$URL" send_message "$msg" ) > "$SBX/out" 2>&1
 eq "verbatim" "${msg}x" "$(cat "$SBX/message"; printf x)"
 
+echo "=== N7: NOTIFICATION_URL as a file path (with trailing newline) ==="
+reset
+printf '%s\n' "$URL" > "$SBX/notif.secret"
+( NOTIFICATION_URL="$SBX/notif.secret" send_message "from file" ) > "$SBX/out" 2>&1
+eq "URL resolved in SHOUTRRR_URL" "$URL" "$(cat "$SBX/envurl")"
+eq "token not in argv"            "0"    "$(grep -c SECRET "$SBX/argv")"
+eq "token not logged"             "0"    "$(grep -c SECRET "$SBX/out")"
+
+echo "=== N8: NOTIFICATION_URL pointing to an empty file does not notify and warns ==="
+reset
+: > "$SBX/empty.secret"
+( NOTIFICATION_URL="$SBX/empty.secret" send_message "skip" ) > "$SBX/out" 2>&1
+eq "shoutrrr not run" "no" "$([ -e "$SBX/argv" ] && echo yes || echo no)"
+eq "warns empty file" "1"  "$(grep -c 'empty file' "$SBX/out")"
+
+echo "=== N9: NOTIFICATION_URL pointing to an unreadable file does not notify and warns ==="
+reset
+printf '%s\n' "$URL" > "$SBX/unreadable.secret"
+chmod 000 "$SBX/unreadable.secret"
+if [ "$(id -u)" -ne 0 ]; then
+  ( NOTIFICATION_URL="$SBX/unreadable.secret" send_message "skip" ) > "$SBX/out" 2>&1
+  eq "shoutrrr not run" "no" "$([ -e "$SBX/argv" ] && echo yes || echo no)"
+  eq "warns unreadable" "1"  "$(grep -c 'cannot be read' "$SBX/out")"
+fi
+chmod 600 "$SBX/unreadable.secret"
+
+echo "=== N10: NOTIFICATION_URL pointing to a missing /path warns ==="
+reset
+( NOTIFICATION_URL="/run/secrets/no-existe-notif" send_message "missing" ) > "$SBX/out" 2>&1
+eq "warns missing path" "1" "$(grep -c 'was not found' "$SBX/out")"
+
 echo
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" = 0 ]

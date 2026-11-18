@@ -205,18 +205,59 @@ Any user on the host can read the command line of any process with `ps`, includi
 - the master password (`BW_PASSWORD`) reaches `bw unlock` through an environment variable (`--passwordenv`), which only the process owner and root can read;
 - the export password (`EXPORT_PASSWORD`) reaches `bw export` through stdin, answering the CLI's own prompt. That prompt is kept out of the log, since it is redrawn once per character and would give away the password's length.
 
-Nothing has to be configured for this. Every credential variable accepts either the value itself or **the path of a file holding it**, which is what makes the two options below work.
+Nothing has to be configured for this. All six secret-carrying variables (`BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`, `EXPORT_PASSWORD`, `NOTIFICATION_URL` and `PING_URL`) accept either the literal value or **the path of a file holding it**, which is what makes the two options below work (keeping every token out of `docker inspect` and `/proc/<pid>/environ`).
 
 ### Option A: Docker secrets
 
 ```bash
 mkdir ./.secrets
-echo '<client id>'     > ./.secrets/.bwclientid
-echo '<client secret>' > ./.secrets/.bwsecret
-echo '<password>'      > ./.secrets/.bwpassword
+echo '<client id>'        > ./.secrets/.bwclientid
+echo '<client secret>'    > ./.secrets/.bwsecret
+echo '<master password>'  > ./.secrets/.bwpassword
+echo '<export password>'  > ./.secrets/.exportpassword
+echo '<shoutrrr url>'     > ./.secrets/.notificationurl
+echo '<ping url>'         > ./.secrets/.pingurl
 ```
 
-Then configure and run [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Reference: [Docker secrets in Compose](https://docs.docker.com/compose/use-secrets/).
+```yaml
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - BW_CLIENTID=/run/secrets/bwclientid
+      - BW_CLIENTSECRET=/run/secrets/bwsecret
+      - BW_PASSWORD=/run/secrets/bwpassword
+      - EXPORT_PASSWORD=/run/secrets/exportpassword
+      - NOTIFICATION_URL=/run/secrets/notificationurl
+      - PING_URL=/run/secrets/pingurl
+    secrets:
+      - bwclientid
+      - bwsecret
+      - bwpassword
+      - exportpassword
+      - notificationurl
+      - pingurl
+
+secrets:
+  bwclientid:
+    file: ./.secrets/.bwclientid
+  bwsecret:
+    file: ./.secrets/.bwsecret
+  bwpassword:
+    file: ./.secrets/.bwpassword
+  exportpassword:
+    file: ./.secrets/.exportpassword
+  notificationurl:
+    file: ./.secrets/.notificationurl
+  pingurl:
+    file: ./.secrets/.pingurl
+```
+
+See [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Reference: [Docker secrets in Compose](https://docs.docker.com/compose/use-secrets/).
 
 ### Option B: Infisical
 

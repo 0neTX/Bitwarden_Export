@@ -120,6 +120,37 @@ echo "=== P9: unset PING_URL does nothing at all ==="
 eq "curl never called" "0"  "$(wc -c < "$CURL_LOG")"
 eq "nothing logged"    "0"  "$(wc -c < "$SBX/out")"
 
+echo "=== P10: PING_URL as a file path (with trailing newline) ==="
+: > "$CURL_LOG"
+printf 'https://hc-ping.com/SECRET-token-file/{code}\n' > "$SBX/ping.secret"
+( export PATH="$SBX/bin:$PATH" PING_URL="$SBX/ping.secret"; send_ping success 0 ) > "$SBX/out" 2>&1
+eq "called once"          "1"  "$(wc -l < "$CURL_LOG")"
+eq "pinged resolved URL"  "https://hc-ping.com/SECRET-token-file/0" "$(awk '{print $NF}' "$CURL_LOG")"
+eq "token not logged"     "0"  "$(grep -c SECRET "$SBX/out")"
+
+echo "=== P11: PING_URL pointing to an empty file does not ping and warns ==="
+: > "$CURL_LOG"
+: > "$SBX/ping.empty"
+( export PATH="$SBX/bin:$PATH" PING_URL="$SBX/ping.empty"; send_ping start ) > "$SBX/out" 2>&1
+eq "curl not called"  "0" "$(wc -c < "$CURL_LOG")"
+eq "warns empty file" "1" "$(grep -c 'empty file' "$SBX/out")"
+
+echo "=== P12: PING_URL pointing to an unreadable file does not ping and warns ==="
+: > "$CURL_LOG"
+printf 'https://hc-ping.com/SECRET-token-file\n' > "$SBX/ping.unreadable"
+chmod 000 "$SBX/ping.unreadable"
+if [ "$(id -u)" -ne 0 ]; then
+  ( export PATH="$SBX/bin:$PATH" PING_URL="$SBX/ping.unreadable"; send_ping start ) > "$SBX/out" 2>&1
+  eq "curl not called"  "0" "$(wc -c < "$CURL_LOG")"
+  eq "warns unreadable" "1" "$(grep -c 'cannot be read' "$SBX/out")"
+fi
+chmod 600 "$SBX/ping.unreadable"
+
+echo "=== P13: PING_URL pointing to a missing /path warns ==="
+: > "$CURL_LOG"
+( export PATH="$SBX/bin:$PATH" PING_URL="/run/secrets/no-existe-ping"; send_ping start ) > "$SBX/out" 2>&1
+eq "warns missing path" "1" "$(grep -c 'was not found' "$SBX/out")"
+
 rm -rf "$SBX"
 echo
 echo "PASS=$pass FAIL=$fail"

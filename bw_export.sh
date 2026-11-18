@@ -30,6 +30,13 @@ UCyan='\033[4;36m'   # Cyan
 UWhite='\033[4;37m'  # White
 Blue='\033[0;34m'    # Blue
 
+SECRETS_LIB="${SECRETS_LIB:-/usr/local/lib/bw-export/secrets.sh}"
+if [[ ! -f "$SECRETS_LIB" ]]; then
+    SECRETS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/root/usr/local/lib/bw-export/secrets.sh"
+fi
+# shellcheck disable=SC1090
+. "$SECRETS_LIB"
+
 echo Starting ...
 #Set locations to save export files
 if [[ -z "${OUTPUT_PATH}" ]]; then
@@ -107,12 +114,8 @@ if [[ -z "${BW_CLIENTID}" ]]; then
     echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
     params_validated=-1
 else
-    if test -f "${BW_CLIENTID}"; then
-        client_id=$(<"${BW_CLIENTID}")
-    else
-        client_id="${BW_CLIENTID}"
-    fi
-
+    client_id=$(resolve_secret BW_CLIENTID)
+    [[ -z "$client_id" ]] && params_validated=-1
 fi
 
 if [[ -z "${BW_CLIENTSECRET}" ]]; then
@@ -123,12 +126,8 @@ if [[ -z "${BW_CLIENTSECRET}" ]]; then
     echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
     params_validated=-1
 else
-    if test -f "${BW_CLIENTSECRET}"; then
-        client_secret=$(<"${BW_CLIENTSECRET}")
-    else
-        client_secret="${BW_CLIENTSECRET}"
-    fi
-
+    client_secret=$(resolve_secret BW_CLIENTSECRET)
+    [[ -z "$client_secret" ]] && params_validated=-1
 fi
 
 if [[ -z "${BW_PASSWORD}" ]]; then
@@ -137,12 +136,8 @@ if [[ -z "${BW_PASSWORD}" ]]; then
 
     params_validated=-1
 else
-
-    if test -f "${BW_PASSWORD}"; then
-        bw_password=$(<"${BW_PASSWORD}")
-    else
-        bw_password="${BW_PASSWORD}"
-    fi
+    bw_password=$(resolve_secret BW_PASSWORD)
+    [[ -z "$bw_password" ]] && params_validated=-1
 fi
 
 #Set Organization ID (if applicable)
@@ -169,11 +164,11 @@ if [[ -z "${EXPORT_PASSWORD}" ]]; then
     password1=""
 
 else
-    echo -e "\n$(date '+%F %T') ${Cyan}Info:  Be sure to save your EXPORT_PASSWORD in a safe place!"
-    if test -f "${EXPORT_PASSWORD}"; then
-        password1=$(<"${EXPORT_PASSWORD}")
+    password1=$(resolve_secret EXPORT_PASSWORD)
+    if [[ -n "$password1" ]]; then
+        echo -e "\n$(date '+%F %T') ${Cyan}Info:  Be sure to save your EXPORT_PASSWORD in a safe place!"
     else
-        password1="${EXPORT_PASSWORD}"
+        echo -e "\n$(date '+%F %T') ${IYellow}Warning: EXPORT_PASSWORD resolved to empty. Vault will be exported unencrypted."
     fi
 fi
 

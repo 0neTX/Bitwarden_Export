@@ -3,6 +3,11 @@
 # cannot be sourced by a test. See tests/run_notify_tests.sh.
 # shellcheck shell=bash
 
+if ! declare -F resolve_secret >/dev/null 2>&1; then
+    # shellcheck disable=SC1091
+    . "$(dirname "${BASH_SOURCE[0]}")/secrets.sh"
+fi
+
 # Sends $1 to NOTIFICATION_URL, or does nothing when that is not set.
 #
 # The URL carries the service's credentials (a Telegram bot token, a Gotify app
@@ -22,10 +27,11 @@
 # exit code, or change the code of a bad one.
 send_message() {
     set +x
-    [[ -z "${NOTIFICATION_URL:-}" ]] && return 0
-    local message="$1"
+    local url message="$1"
+    url="$(resolve_secret NOTIFICATION_URL)"
+    [[ -z "$url" ]] && return 0
     [[ -z "$message" ]] && message="Bitwarden/Vaultwarden Export: (no log output to send)"
-    if ! SHOUTRRR_URL="$NOTIFICATION_URL" "${SHOUTRRR_BIN:-/app/shoutrrr}" send -m "$message" 2>/dev/null; then
+    if ! SHOUTRRR_URL="$url" "${SHOUTRRR_BIN:-/app/shoutrrr}" send -m "$message" 2>/dev/null; then
         echo -e "${Yellow:-}Warning: sending the notification failed; continuing."
     fi
     return 0
