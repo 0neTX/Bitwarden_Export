@@ -91,6 +91,37 @@ docker compose up
 
 The container performs one export and exits with the export's status code.
 
+### Docker Compose with built-in CRON
+
+If you want the container to stay running and run backups on a schedule (for example daily at 03:00), use [`docker-compose.cron.sample.yml`](docker-compose.cron.sample.yml):
+
+```yaml
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    restart: unless-stopped
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - BW_PASSWORD=<BITWARDEN PASSWORD>
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      - BW_URL_SERVER=https://vault.example.com
+      - CRON=0 3 * * *
+      - TZ=Europe/Madrid
+      - KEEP_LAST_BACKUPS=5
+      - FILE_LOG=/var/data/bw-export-logfile.log
+```
+
+```bash
+docker compose -f docker-compose.cron.sample.yml up -d
+```
+
+The container validates the `CRON` expression, runs an initial backup immediately on startup, and keeps running to execute scheduled backups.
+
 ### Plain `docker run`
 
 ```bash
