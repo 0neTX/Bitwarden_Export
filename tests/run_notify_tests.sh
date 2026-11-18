@@ -101,13 +101,16 @@ if [ "$(id -u)" -ne 0 ]; then
   ( NOTIFICATION_URL="$SBX/unreadable.secret" send_message "skip" ) > "$SBX/out" 2>&1
   eq "shoutrrr not run" "no" "$([ -e "$SBX/argv" ] && echo yes || echo no)"
   eq "warns unreadable" "1"  "$(grep -c 'cannot be read' "$SBX/out")"
+else
+  echo "  SKIP  2 assertions: root reads any file, so it cannot be made unreadable"
 fi
 chmod 600 "$SBX/unreadable.secret"
 
-echo "=== N10: NOTIFICATION_URL pointing to a missing /path warns ==="
+echo "=== N10: NOTIFICATION_URL under /run/secrets but not mounted: no send, a warning ==="
 reset
 ( NOTIFICATION_URL="/run/secrets/no-existe-notif" send_message "missing" ) > "$SBX/out" 2>&1
-eq "warns missing path" "1" "$(grep -c 'was not found' "$SBX/out")"
+eq "shoutrrr not run"  "no" "$([ -e "$SBX/argv" ] && echo yes || echo no)"
+eq "warns not mounted" "1"  "$(grep -c 'not mounted' "$SBX/out")"
 
 echo
 echo "PASS=$pass FAIL=$fail"

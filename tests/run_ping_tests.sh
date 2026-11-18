@@ -143,13 +143,16 @@ if [ "$(id -u)" -ne 0 ]; then
   ( export PATH="$SBX/bin:$PATH" PING_URL="$SBX/ping.unreadable"; send_ping start ) > "$SBX/out" 2>&1
   eq "curl not called"  "0" "$(wc -c < "$CURL_LOG")"
   eq "warns unreadable" "1" "$(grep -c 'cannot be read' "$SBX/out")"
+else
+  echo "  SKIP  2 assertions: root reads any file, so it cannot be made unreadable"
 fi
 chmod 600 "$SBX/ping.unreadable"
 
-echo "=== P13: PING_URL pointing to a missing /path warns ==="
+echo "=== P13: PING_URL under /run/secrets but not mounted: no ping, a warning ==="
 : > "$CURL_LOG"
 ( export PATH="$SBX/bin:$PATH" PING_URL="/run/secrets/no-existe-ping"; send_ping start ) > "$SBX/out" 2>&1
-eq "warns missing path" "1" "$(grep -c 'was not found' "$SBX/out")"
+eq "curl not called"   "0" "$(wc -c < "$CURL_LOG")"
+eq "warns not mounted" "1" "$(grep -c 'not mounted' "$SBX/out")"
 
 rm -rf "$SBX"
 echo

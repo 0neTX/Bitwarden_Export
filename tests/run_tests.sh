@@ -10,6 +10,8 @@
 # shellcheck disable=SC2319,SC2030,SC2031,SC2016
 SP="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="${SCRIPT:?}"
+# The script sources it from where the image installs it; here, the repository.
+export SECRETS_LIB="$SP/../root/usr/local/lib/bw-export/secrets.sh"
 pass=0; fail=0
 
 # Sets up a fresh sandbox; $1 = a snippet that seeds the CLI state file.
@@ -530,6 +532,38 @@ check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
 check "three Saved lines" "$([ "$(grep -c '^Saved .*/att/.*/\(Doc/a\.pdf\|Doc/b\.txt\|Key/c\.key\)$' "$SP/sbx/output")" = 3 ]; echo $?)" "$(grep 'Saved' "$SP/sbx/output")"
 check "never two on one line" "$(! grep -q 'Saved .*Saved' "$SP/sbx/output"; echo $?)" "$(grep 'Saved.*Saved' "$SP/sbx/output")"
 check "a failed one is still counted" "$(export BW_FAIL_ATTACH=b.txt; rc=$(run); [ "$rc" = 1 ] && grep -q '1 attachment(s) could not be saved' "$SP/sbx/output"; echo $?)" "$(grep -i 'attach' "$SP/sbx/output")"
+
+echo "=== T41: an EXPORT_PASSWORD that yields no password never exports unencrypted ==="
+# A folder is what Docker makes of a bind-mounted secret file that does not
+# exist; /run/secrets/<name> unmounted and an empty file are the other two ways.
+mkdir -p "$SP/sbx-t41/folder"; : > "$SP/sbx-t41/empty"
+for exp in "$SP/sbx-t41/folder" "$SP/sbx-t41/empty" "/run/secrets/bw-export-test-not-mounted"; do
+  setup ""
+  export BW_REAL_PW=correct-pw EXP="$exp"
+  rc=$(run)
+  check "[${exp##*/}] exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+  check "[${exp##*/}] nothing exported" "$(! grep -q '^bw export' "$SP/sbx/calls" && [ -z "$(find "$SP/sbx/out" -type f)" ]; echo $?)" "$(grep '^bw export' "$SP/sbx/calls")"
+  check "[${exp##*/}] says why" "$(grep -q 'EXPORT_PASSWORD is set, but no password could be read' "$SP/sbx/output"; echo $?)" "$(grep -i 'export_password' "$SP/sbx/output")"
+done
+rm -rf "$SP/sbx-t41"
+
+echo "=== T42: a credential under /run/secrets that is not mounted stops the run ==="
+setup ""
+export BW_REAL_PW=correct-pw PW=/run/secrets/bw-export-test-not-mounted
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "never logged in" "$(! grep -q '^bw login' "$SP/sbx/calls"; echo $?)" "$(grep '^bw login' "$SP/sbx/calls")"
+check "names the variable" "$(grep -q 'BW_PASSWORD is set, but no value could be read' "$SP/sbx/output"; echo $?)" "$(grep -i 'bw_password' "$SP/sbx/output")"
+check "the path is not the password" "$(! grep -q 'bw-export-test-not-mounted' "$SP/sbx/state"; echo $?)" "$(cat "$SP/sbx/state")"
+
+echo "=== T43: a literal password that starts with / is used as is, without a warning ==="
+setup ""
+export BW_REAL_PW=/Passw0rd PW=/Passw0rd EXP=/Export-pw
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(tail -4 "$SP/sbx/output")"
+check "export got it verbatim" "$(grep -qxF 'personal	/Export-pw' "$SP/sbx/pwlog"; echo $?)" "pwlog: $(cut -f1 "$SP/sbx/pwlog")"
+check "no warning" "$(! grep -qi 'warning: .*\(BW_PASSWORD\|EXPORT_PASSWORD\)' "$SP/sbx/output"; echo $?)" "$(grep -i warning "$SP/sbx/output")"
+unset EXP
 
 echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
 setup ""

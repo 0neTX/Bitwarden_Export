@@ -30,12 +30,14 @@ UCyan='\033[4;36m'   # Cyan
 UWhite='\033[4;37m'  # White
 Blue='\033[0;34m'    # Blue
 
+# Overridable like entrypoint.sh's PING_LIB and NOTIFY_LIB, so the tests can
+# point it at the repository. Without it no credential can be read at all.
 SECRETS_LIB="${SECRETS_LIB:-/usr/local/lib/bw-export/secrets.sh}"
-if [[ ! -f "$SECRETS_LIB" ]]; then
-    SECRETS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/root/usr/local/lib/bw-export/secrets.sh"
-fi
 # shellcheck disable=SC1090
-. "$SECRETS_LIB"
+if ! . "$SECRETS_LIB"; then
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not load $SECRETS_LIB, exiting..."
+    exit 1
+fi
 
 echo Starting ...
 #Set locations to save export files
@@ -115,7 +117,10 @@ if [[ -z "${BW_CLIENTID}" ]]; then
     params_validated=-1
 else
     client_id=$(resolve_secret BW_CLIENTID)
-    [[ -z "$client_id" ]] && params_validated=-1
+    if [[ -z "$client_id" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTID is set, but no value could be read from it."
+        params_validated=-1
+    fi
 fi
 
 if [[ -z "${BW_CLIENTSECRET}" ]]; then
@@ -127,7 +132,10 @@ if [[ -z "${BW_CLIENTSECRET}" ]]; then
     params_validated=-1
 else
     client_secret=$(resolve_secret BW_CLIENTSECRET)
-    [[ -z "$client_secret" ]] && params_validated=-1
+    if [[ -z "$client_secret" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTSECRET is set, but no value could be read from it."
+        params_validated=-1
+    fi
 fi
 
 if [[ -z "${BW_PASSWORD}" ]]; then
@@ -137,7 +145,10 @@ if [[ -z "${BW_PASSWORD}" ]]; then
     params_validated=-1
 else
     bw_password=$(resolve_secret BW_PASSWORD)
-    [[ -z "$bw_password" ]] && params_validated=-1
+    if [[ -z "$bw_password" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_PASSWORD is set, but no value could be read from it."
+        params_validated=-1
+    fi
 fi
 
 #Set Organization ID (if applicable)
@@ -168,7 +179,12 @@ else
     if [[ -n "$password1" ]]; then
         echo -e "\n$(date '+%F %T') ${Cyan}Info:  Be sure to save your EXPORT_PASSWORD in a safe place!"
     else
-        echo -e "\n$(date '+%F %T') ${IYellow}Warning: EXPORT_PASSWORD resolved to empty. Vault will be exported unencrypted."
+        # Set means an encrypted export was asked for. Falling back to a plain
+        # one wrote the whole vault to disk unencrypted and reported success,
+        # for instance when Docker had made a folder of a missing secret file.
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: EXPORT_PASSWORD is set, but no password could be read from it."
+        echo -e "$(date '+%F %T') ${IYellow}The vault is not exported unencrypted in its place."
+        params_validated=-1
     fi
 fi
 
@@ -176,7 +192,7 @@ fi
 if [[ $params_validated != 0 ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}One or more required environment variables have not been set."
     echo -e "${IYellow}Please check the required environment variables:"
-    echo -e "${IYellow}BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD"
+    echo -e "${IYellow}BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD and, if set, EXPORT_PASSWORD"
     exit 1
 fi
 

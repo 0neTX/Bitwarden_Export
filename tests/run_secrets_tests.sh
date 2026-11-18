@@ -63,12 +63,15 @@ if [ "$(id -u)" -ne 0 ]; then
   ( SECRET_VAR="$SBX/unreadable"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
   eq "empty output"     ""  "$(cat "$SBX/val")"
   eq "warns unreadable" "1" "$(grep -c 'cannot be read' "$SBX/err")"
+else
+  echo "  SKIP  2 assertions: root reads any file, so it cannot be made unreadable"
 fi
 chmod 600 "$SBX/unreadable"
 
-echo "=== S9: missing path starting with / warns without leaking value ==="
+echo "=== S9: an unmounted /run/secrets path is empty, never a literal ==="
 ( SECRET_VAR="/run/secrets/SECRET-missing-tok"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
-eq "warns missing path"     "1" "$(grep -c 'was not found' "$SBX/err")"
+eq "empty output"           ""  "$(cat "$SBX/val")"
+eq "warns not mounted"      "1" "$(grep -c 'not mounted' "$SBX/err")"
 eq "value not in warning"   "0" "$(grep -c 'SECRET-missing-tok' "$SBX/err")"
 
 echo "=== S10: directory path returns empty and warns ==="
@@ -88,6 +91,17 @@ echo "=== S12: set -x trace does not leak resolved secret ==="
 printf 'SUPER-SECRET-TOKEN-999\n' > "$SBX/traced"
 ( export SECRET_VAR="$SBX/traced"; set -x; resolve_secret SECRET_VAR >/dev/null ) > "$SBX/trace" 2>&1
 eq "token not in trace" "0" "$(grep -c 'SUPER-SECRET-TOKEN-999' "$SBX/trace")"
+
+echo "=== S13: a literal that starts with / is used as is, without a warning ==="
+( SECRET_VAR="/Passw0rd"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
+eq "literal kept" "/Passw0rd" "$(cat "$SBX/val")"
+eq "no warning"   ""          "$(cat "$SBX/err")"
+
+echo "=== S14: a missing file in a folder that exists warns, and the value is kept ==="
+( SECRET_VAR="$SBX/SECRET-typo-file"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
+eq "literal kept"         "$SBX/SECRET-typo-file" "$(cat "$SBX/val")"
+eq "warns not found"      "1" "$(grep -c 'was not found' "$SBX/err")"
+eq "value not in warning" "0" "$(grep -c 'SECRET-typo-file' "$SBX/err")"
 
 echo ""
 echo "PASS=$pass FAIL=$fail"

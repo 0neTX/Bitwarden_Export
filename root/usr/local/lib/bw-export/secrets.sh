@@ -8,8 +8,10 @@
 # - If its value is an existing regular file, prints the first non-empty line
 #   (stripping trailing \r/\n). Warns on stderr and prints nothing if the file
 #   is unreadable or empty.
-# - Otherwise, prints the literal value. If it starts with '/' and does not
-#   exist on disk, warns on stderr that it looks like a missing file path.
+# - A path under /run/secrets that does not exist is a secret that was not
+#   mounted, never a literal value: warns on stderr and prints nothing.
+# - Otherwise, prints the literal value. When it looks like a file in a folder
+#   that exists, warns on stderr that the file was not found.
 #
 # Never prints the secret value itself in any warning or trace.
 resolve_secret() {
@@ -47,8 +49,19 @@ resolve_secret() {
         return 0
     fi
 
-    if [[ "$val" == /* ]]; then
-        echo -e "${Yellow:-}Warning: $name starts with '/' and looks like a file path, but the file was not found." >&2
+    # Docker mounts secrets there. Used as a literal, the path itself became
+    # the password: the export was encrypted with "/run/secrets/..." instead.
+    if [[ "$val" == /run/secrets/* ]]; then
+        echo -e "${Yellow:-}Warning: $name points to /run/secrets, but that secret is not mounted." >&2
+        return 0
+    fi
+
+    # A missing file in a folder that exists is most likely a mistake. A literal
+    # value that merely starts with '/' (a password, say) has no such folder,
+    # and is not warned about on every run.
+    local dir="${val%/*}"
+    if [[ "$val" == /* && -n "$dir" && -d "$dir" ]]; then
+        echo -e "${Yellow:-}Warning: $name looks like a file path, but the file was not found." >&2
     fi
 
     printf '%s' "$val"
