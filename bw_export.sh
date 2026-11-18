@@ -108,9 +108,9 @@ fi
 #Set Bitwarden session authentication.
 # To obtain your organization_id value, open a terminal and type:
 #   bw login #(follow the prompts);
-if [[ -z "${BW_CLIENTID}" ]]; then
+if ! secret_is_set BW_CLIENTID; then
 
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTID enviroment variable not provided, exiting..."
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_CLIENTID nor BW_CLIENTID_FILE is set, exiting..."
 
     echo -n "$(date '+%F %T') Your Bitwarden Personal API Key can be obtain in:"
     echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
@@ -123,9 +123,9 @@ else
     fi
 fi
 
-if [[ -z "${BW_CLIENTSECRET}" ]]; then
+if ! secret_is_set BW_CLIENTSECRET; then
 
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTSECRET enviroment variable not provided, exiting..."
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_CLIENTSECRET nor BW_CLIENTSECRET_FILE is set, exiting..."
 
     echo -n "$(date '+%F %T') Your Bitwarden Personal API Key can be obtain in:"
     echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
@@ -138,9 +138,9 @@ else
     fi
 fi
 
-if [[ -z "${BW_PASSWORD}" ]]; then
+if ! secret_is_set BW_PASSWORD; then
 
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_PASSWORD enviroment variable not provided, exiting..."
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_PASSWORD nor BW_PASSWORD_FILE is set, exiting..."
 
     params_validated=-1
 else
@@ -165,7 +165,7 @@ elif [[ -z "${BW_ORGANIZATIONS_LIST}" ]]; then
 fi
 
 #Check export password
-if [[ -z "${EXPORT_PASSWORD}" ]]; then
+if ! secret_is_set EXPORT_PASSWORD; then
 
     echo
     echo -e "\n$(date '+%F %T') ${IYellow}-------------------------------------------------------------------------------------------------------------"
@@ -216,8 +216,9 @@ close_session() {
 echo "$(date '+%F %T') $(date '+%F %T') Starting exporting..."
 echo
 
-BW_CLIENTID=$client_id
-BW_CLIENTSECRET=$client_secret
+# bw login --apikey reads them from the environment. Exported explicitly: given
+# through BW_CLIENTID_FILE, they were never in the environment to begin with.
+export BW_CLIENTID="$client_id" BW_CLIENTSECRET="$client_secret"
 
 # From here on the CLI holds state, so never leave a session behind: a leftover
 # session makes every later run fail at "bw config server" and at "bw unlock".

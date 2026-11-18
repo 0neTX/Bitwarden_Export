@@ -148,6 +148,13 @@ else
 fi
 chmod 600 "$SBX/ping.unreadable"
 
+echo "=== P14: PING_URL_FILE is read ==="
+: > "$CURL_LOG"
+printf 'https://hc-ping.com/SECRET-token-file/{code}\n' > "$SBX/ping.file"
+( export PATH="$SBX/bin:$PATH" PING_URL_FILE="$SBX/ping.file"; unset PING_URL; send_ping success 0 ) > "$SBX/out" 2>&1
+eq "pinged resolved URL" "https://hc-ping.com/SECRET-token-file/0" "$(awk '{print $NF}' "$CURL_LOG")"
+eq "token not logged"    "0" "$(grep -c SECRET "$SBX/out")"
+
 echo "=== P13: PING_URL under /run/secrets but not mounted: no ping, a warning ==="
 : > "$CURL_LOG"
 ( export PATH="$SBX/bin:$PATH" PING_URL="/run/secrets/no-existe-ping"; send_ping start ) > "$SBX/out" 2>&1

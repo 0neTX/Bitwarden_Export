@@ -103,6 +103,43 @@ eq "literal kept"         "$SBX/SECRET-typo-file" "$(cat "$SBX/val")"
 eq "warns not found"      "1" "$(grep -c 'was not found' "$SBX/err")"
 eq "value not in warning" "0" "$(grep -c 'SECRET-typo-file' "$SBX/err")"
 
+echo "=== S15: NAME_FILE is read, without its CRLF ==="
+printf 'SECRET-from-file\r\n' > "$SBX/s15"
+( SECRET_VAR_FILE="$SBX/s15"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
+eq "file value" "SECRET-from-file" "$(cat "$SBX/val")"
+eq "no warning" ""                 "$(cat "$SBX/err")"
+
+echo "=== S16: NAME and NAME_FILE both set: nothing, and a warning ==="
+( SECRET_VAR="SECRET-literal"; SECRET_VAR_FILE="$SBX/s15"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
+eq "empty output"         ""  "$(cat "$SBX/val")"
+eq "warns both set"       "1" "$(grep -c 'SECRET_VAR and SECRET_VAR_FILE are both set' "$SBX/err")"
+eq "value not in warning" "0" "$(grep -c 'SECRET-' "$SBX/err")"
+
+echo "=== S17: NAME_FILE is always a path: a missing one is reported, wherever it is ==="
+( SECRET_VAR_FILE="/nonexistent-dir/SECRET-x"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
+eq "empty output"         ""  "$(cat "$SBX/val")"
+eq "warns does not exist" "1" "$(grep -c 'SECRET_VAR_FILE points to a file that does not exist' "$SBX/err")"
+eq "path not in warning"  "0" "$(grep -c 'SECRET-x' "$SBX/err")"
+
+echo "=== S18: NAME_FILE empty or a folder: nothing, and a warning ==="
+( SECRET_VAR_FILE="$SBX/empty"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
+eq "empty file: empty output" "" "$(cat "$SBX/val")"
+eq "empty file: warns"        "1" "$(grep -c 'SECRET_VAR_FILE points to an empty file' "$SBX/err")"
+( SECRET_VAR_FILE="$SBX/adir"; out=$(resolve_secret SECRET_VAR 2>"$SBX/err"); printf '%s' "$out" > "$SBX/val" )
+eq "folder: empty output"     "" "$(cat "$SBX/val")"
+eq "folder: warns"            "1" "$(grep -c 'SECRET_VAR_FILE points to a path that is not a regular file' "$SBX/err")"
+
+echo "=== S19: secret_is_set sees NAME or NAME_FILE ==="
+eq "neither"   "1" "$( ( unset SECRET_VAR SECRET_VAR_FILE; secret_is_set SECRET_VAR ); echo $?)"
+eq "NAME"      "0" "$( ( SECRET_VAR=x; unset SECRET_VAR_FILE; secret_is_set SECRET_VAR ); echo $?)"
+eq "NAME_FILE" "0" "$( ( unset SECRET_VAR; SECRET_VAR_FILE=/x; secret_is_set SECRET_VAR ); echo $?)"
+eq "both empty" "1" "$( ( SECRET_VAR=; SECRET_VAR_FILE=; secret_is_set SECRET_VAR ); echo $?)"
+
+echo "=== S20: set -x trace does not leak a value read through NAME_FILE ==="
+printf 'SUPER-SECRET-FILE-TOKEN\n' > "$SBX/s20"
+( export SECRET_VAR_FILE="$SBX/s20"; set -x; resolve_secret SECRET_VAR >/dev/null ) > "$SBX/trace" 2>&1
+eq "token not in trace" "0" "$(grep -c 'SUPER-SECRET-FILE-TOKEN' "$SBX/trace")"
+
 echo ""
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

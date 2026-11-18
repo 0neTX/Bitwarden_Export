@@ -106,6 +106,13 @@ else
 fi
 chmod 600 "$SBX/unreadable.secret"
 
+echo "=== N11: NOTIFICATION_URL_FILE is read ==="
+reset
+printf '%s\n' "$URL" > "$SBX/notif.file"
+( unset NOTIFICATION_URL; NOTIFICATION_URL_FILE="$SBX/notif.file" send_message "via _FILE" ) > "$SBX/out" 2>&1
+eq "URL resolved in SHOUTRRR_URL" "$URL" "$(cat "$SBX/envurl")"
+eq "token not logged"             "0"    "$(grep -c SECRET "$SBX/out")"
+
 echo "=== N10: NOTIFICATION_URL under /run/secrets but not mounted: no send, a warning ==="
 reset
 ( NOTIFICATION_URL="/run/secrets/no-existe-notif" send_message "missing" ) > "$SBX/out" 2>&1

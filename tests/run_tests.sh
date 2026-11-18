@@ -565,6 +565,50 @@ check "export got it verbatim" "$(grep -qxF 'personal	/Export-pw' "$SP/sbx/pwlog
 check "no warning" "$(! grep -qi 'warning: .*\(BW_PASSWORD\|EXPORT_PASSWORD\)' "$SP/sbx/output"; echo $?)" "$(grep -i warning "$SP/sbx/output")"
 unset EXP
 
+# run(), but with every credential given through its _FILE variable instead.
+run_files() {
+  ( export PATH="$SP/mock:$PATH" \
+      OUTPUT_PATH="$SP/sbx/out" ATTACHMENTS_PATH="$SP/sbx/att" \
+      BW_URL_SERVER="https://vw.example.com" BW_EXPORT_PWLOG="$SP/sbx/pwlog" \
+      BW_CLIENTID_FILE="$SP/sbx/f/id" BW_CLIENTSECRET_FILE="$SP/sbx/f/secret" \
+      BW_PASSWORD_FILE="$SP/sbx/f/pw" EXPORT_PASSWORD_FILE="${EXPF:-$SP/sbx/f/exp}"
+    unset BW_CLIENTID BW_CLIENTSECRET BW_PASSWORD EXPORT_PASSWORD
+    [ -n "${BOTH:-}" ] && export BW_PASSWORD=also-set
+    bash "$SCRIPT" ) > "$SP/sbx/output" 2>&1
+  echo $?
+}
+files_setup() {
+  setup ""
+  mkdir -p "$SP/sbx/f"
+  printf 'id-from-file\n' > "$SP/sbx/f/id"; printf 'secret-from-file\r\n' > "$SP/sbx/f/secret"
+  printf 'master-from-file\n' > "$SP/sbx/f/pw"; printf 'export-from-file\n' > "$SP/sbx/f/exp"
+  export BW_REAL_PW=master-from-file
+}
+
+echo "=== T44: every credential through its _FILE variable ==="
+files_setup
+rc=$(run_files)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(grep -i 'error\|warning' "$SP/sbx/output")"
+check "login got the key from the files" "$(grep -qxF 'APIKEY=id-from-file:secret-from-file' "$SP/sbx/calls"; echo $?)" "$(grep '^APIKEY' "$SP/sbx/calls")"
+check "unlocked with the file's password" "$(grep -q '^bw unlock' "$SP/sbx/calls" && exported; echo $?)" "$(tail -3 "$SP/sbx/output")"
+check "encrypted with the file's password" "$(grep -qxF 'personal	export-from-file' "$SP/sbx/pwlog"; echo $?)" "pwlog: $(cut -f1 "$SP/sbx/pwlog")"
+check "no value in argv" "$(! grep -q 'master-from-file\|export-from-file' "$SP/sbx/calls"; echo $?)" "$(grep 'from-file' "$SP/sbx/calls")"
+
+echo "=== T45: an EXPORT_PASSWORD_FILE that cannot be read never exports unencrypted ==="
+files_setup
+rc=$(EXPF="$SP/sbx/f/missing" run_files)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "nothing exported" "$(! grep -q '^bw export' "$SP/sbx/calls"; echo $?)" "$(grep '^bw export' "$SP/sbx/calls")"
+check "says which file" "$(grep -q 'EXPORT_PASSWORD_FILE points to a file that does not exist' "$SP/sbx/output"; echo $?)" "$(grep -i 'export_password' "$SP/sbx/output")"
+
+echo "=== T46: BW_PASSWORD and BW_PASSWORD_FILE both set stop the run ==="
+files_setup
+rc=$(BOTH=1 run_files)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says both are set" "$(grep -q 'BW_PASSWORD and BW_PASSWORD_FILE are both set' "$SP/sbx/output"; echo $?)" "$(grep -i 'bw_password' "$SP/sbx/output")"
+check "never logged in" "$(! grep -q '^bw login' "$SP/sbx/calls"; echo $?)" "$(grep '^bw login' "$SP/sbx/calls")"
+unset BW_REAL_PW
+
 echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
 setup ""
 # The legacy /var/attachment fallback hinges on this, and rootful Docker cannot
