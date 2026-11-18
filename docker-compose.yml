@@ -2,6 +2,8 @@ services:
   bw-export:
     container_name: bw-export
     image: 0netx/bw-export:latest
+    # Uncomment when using CRON so the container restarts automatically after host reboots:
+    # restart: unless-stopped
     volumes:
       - ./export:/var/data
       - ./export:/var/attachments
@@ -23,5 +25,8 @@ services:
       # Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted.
       # - KEEP_LAST_BACKUPS=5
       # Optional: Monitoring endpoint pinged at start and on completion (healthchecks, uptime-kuma, any dead man's switch)
-      # - PING_URL=https://hc-ping.com/<your-uuid>      
+      # - PING_URL=https://hc-ping.com/<your-uuid>
+      # Optional: Run periodically inside the container using a cron expression or macro (@daily, @hourly)
+      # - CRON=0 3 * * *
+      # - TZ=Europe/Madrid
 

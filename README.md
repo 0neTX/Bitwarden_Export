@@ -91,6 +91,37 @@ docker compose up
 
 The container performs one export and exits with the export's status code.
 
+### Docker Compose with built-in CRON
+
+If you want the container to stay running and run backups on a schedule (for example daily at 03:00), use [`docker-compose.cron.sample.yml`](docker-compose.cron.sample.yml):
+
+```yaml
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    restart: unless-stopped
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - BW_PASSWORD=<BITWARDEN PASSWORD>
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      - BW_URL_SERVER=https://vault.example.com
+      - CRON=0 3 * * *
+      - TZ=Europe/Madrid
+      - KEEP_LAST_BACKUPS=5
+      - FILE_LOG=/var/data/bw-export-logfile.log
+```
+
+```bash
+docker compose -f docker-compose.cron.sample.yml up -d
+```
+
+The container validates the `CRON` expression, runs an initial backup immediately on startup, and keeps running to execute scheduled backups.
+
 ### Plain `docker run`
 
 ```bash
@@ -147,7 +178,9 @@ The Bitwarden CLI cannot export items in your **Trash** or your **password histo
 | `OUTPUT_PATH` | `/var/data/` | Where the vault exports are written. The path must exist in the container, normally as a mounted volume. |
 | `ATTACHMENTS_PATH` | `/var/attachments/` | Where the attachments are written, same condition. |
 | `KEEP_LAST_BACKUPS` | keep everything | Keep only the N newest export folders, delete the rest. See [Retention](#retention). |
-| `FILE_LOG` | container-only log | Path of the run log, e.g. `/var/data/bw-export-logfile.log`. Point it inside a mounted volume or it is lost with the container. |
+| `FILE_LOG` | container-only log | Path of the run log, e.g. `/var/data/bw-export-logfile.log`. Point it inside a mounted volume or it is lost with the container. When `CRON` is enabled, appends across runs and rotates to `<FILE_LOG>.1` at 100 MiB. |
+| `CRON` | — (one-shot) | Standard 5-field cron expression (e.g. `0 3 * * *`) or macro (`@daily`, `@hourly`, etc., powered by `supercronic`). Validates the expression on startup (exiting `1` if invalid), runs an initial backup immediately, and keeps running for scheduled backups (skipping overlapping runs; if the initial backup fails, the scheduler keeps running). Recommended: set `restart: unless-stopped`. |
+| `TZ` | `UTC` | Timezone for logs and `CRON` schedules (e.g. `Europe/Madrid`, `America/New_York`). |
 | `NOTIFICATION_URL` | — | Shoutrrr URL for the start/success/failure messages. See [Notifications](#notifications). |
 | `PING_URL` | — | Watchdog endpoint pinged at start and on completion. See [Monitoring](#monitoring). |
 | `INFISICAL_TOKEN` | — | Infisical service token, to read the credentials from Infisical. See [Option B](#option-b-infisical). |

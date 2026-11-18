@@ -1,0 +1,18 @@
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    restart: unless-stopped
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - BW_PASSWORD=<BITWARDEN PASSWORD>
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      - BW_URL_SERVER=https://vault.example.com
+      - CRON=0 3 * * *
+      - TZ=Europe/Madrid
+      - KEEP_LAST_BACKUPS=5
+      - FILE_LOG=/var/data/bw-export-logfile.log

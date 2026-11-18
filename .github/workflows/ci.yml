@@ -26,7 +26,7 @@ jobs:
             bw_export.sh entrypoint.sh root/usr/local/lib/bw-export/ping.sh \
             root/usr/local/lib/bw-export/notify.sh \
             tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
-            tests/run_notify_tests.sh \
+            tests/run_notify_tests.sh tests/run_cron_tests.sh \
             tests/e2e-setup.sh tests/e2e-verify.sh
 
       # 116 assertions against a stateful mock of the Bitwarden CLI. This covers
@@ -46,6 +46,10 @@ jobs:
       - name: notify suite
         run: bash tests/run_notify_tests.sh
 
+      # Assertions against entrypoint.sh (CRON scheduling and one-shot compatibility).
+      - name: cron suite
+        run: bash tests/run_cron_tests.sh
+
   build:
     name: docker build
     runs-on: ubuntu-latest
@@ -64,6 +68,11 @@ jobs:
           push: false
           load: true
           tags: bw-export:ci
+
+      - name: smoke-check supercronic and tzdata
+        run: |
+          docker run --rm --entrypoint supercronic bw-export:ci -version
+          docker run --rm --entrypoint date -e TZ=Europe/Madrid bw-export:ci +%Z | grep -Eq '^(CET|CEST)$'
 
       # Labels are inherited, and ubuntu:24.04 sets
       # org.opencontainers.image.version=24.04 on itself, so until this image
