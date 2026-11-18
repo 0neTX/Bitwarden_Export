@@ -9,6 +9,10 @@ Two layers:
   three-line stub for `curl`.
 - **`run_notify_tests.sh`** — 13 assertions against the `NOTIFICATION_URL` helper
   in `root/usr/local/lib/bw-export/notify.sh`, with a stub for `shoutrrr`.
+- **`run_retention_tests.sh`** — assertions against
+  `root/usr/local/lib/bw-export/retention.sh`, which decides the old backups
+  `KEEP_LAST_BACKUPS` and `KEEP_GFS` delete. Driven with folder names only;
+  nothing is created or deleted.
 - **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.4 and a
   bw-export image built from the repo `Dockerfile`, used to validate issue #21
   end to end.

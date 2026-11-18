@@ -12,6 +12,7 @@ SP="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="${SCRIPT:?}"
 # The script sources it from where the image installs it; here, the repository.
 export SECRETS_LIB="$SP/../root/usr/local/lib/bw-export/secrets.sh"
+export RETENTION_LIB="$SP/../root/usr/local/lib/bw-export/retention.sh"
 pass=0; fail=0
 
 # Sets up a fresh sandbox; $1 = a snippet that seeds the CLI state file.
@@ -19,7 +20,7 @@ setup() {
   unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR \
         BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS \
         BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST BW_FAIL_LIST EXP BW_EXPORT_NOFILE \
-        BW_ORGS_JSON BW_DENY_EXPORT
+        BW_ORGS_JSON BW_DENY_EXPORT ENCRYPT_ATTACHMENTS KEEP_GFS TMPDIR
   rm -rf "$SP/sbx"; mkdir -p "$SP/sbx/out" "$SP/sbx/att"
   export BW_STATE="$SP/sbx/state" BW_CALLLOG="$SP/sbx/calls"
   : > "$BW_CALLLOG"
@@ -608,6 +609,173 @@ check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
 check "says both are set" "$(grep -q 'BW_PASSWORD and BW_PASSWORD_FILE are both set' "$SP/sbx/output"; echo $?)" "$(grep -i 'bw_password' "$SP/sbx/output")"
 check "never logged in" "$(! grep -q '^bw login' "$SP/sbx/calls"; echo $?)" "$(grep '^bw login' "$SP/sbx/calls")"
 unset BW_REAL_PW
+
+REAL_GPG=$(command -v gpg)
+# Lists what an attachments archive holds, decrypted with $2.
+archive_list() {
+  local h; h=$(mktemp -d)
+  "$REAL_GPG" --homedir "$h" --batch --quiet --pinentry-mode loopback --passphrase "$2" -d "$1" 2>/dev/null | tar -tzf - 2>/dev/null | sort | paste -sd' ' -
+  gpgconf --homedir "$h" --kill gpg-agent >/dev/null 2>&1; rm -rf "$h"
+}
+archive() { compgen -G "$SP/sbx/att/*-bw-export/attachments.tar.gz.gpg" | head -n 1; }
+plain_attachments() { find "$SP/sbx/att" -type f ! -name 'attachments.tar.gz.gpg' | wc -l; }
+
+echo "=== T47: ENCRYPT_ATTACHMENTS packs the attachments into one encrypted archive ==="
+setup ""
+mkdir -p "$SP/sbx/tmp" "$SP/sbx/gpgwrap"
+# A gpg that records its arguments, to prove the password never reaches them.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$SP/sbx/gpgargs" "$REAL_GPG" > "$SP/sbx/gpgwrap/gpg"
+chmod +x "$SP/sbx/gpgwrap/gpg"
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach" ENCRYPT_ATTACHMENTS=true TMPDIR="$SP/sbx/tmp" EXP='s3cret export pw'
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"},{"fileName":"b.txt"}]},{"id":"i2","name":".ssh","attachments":[{"fileName":"id_ed25519"}]}]' \
+  > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(PATH="$SP/sbx/gpgwrap:$PATH" run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(tail -5 "$SP/sbx/output")"
+check "one archive written" "$([ -s "$(archive)" ]; echo $?)" "$(find "$SP/sbx/att")"
+check "no plain attachment in the volume" "$([ "$(plain_attachments)" = 0 ]; echo $?)" "$(find "$SP/sbx/att" -type f)"
+check "decrypts with EXPORT_PASSWORD to every file" \
+  "$([ "$(archive_list "$(archive)" 's3cret export pw' | tr ' ' '\n' | grep -c '[^/]$')" = 3 ]; echo $?)" "$(archive_list "$(archive)" 's3cret export pw')"
+check "no ./ entry (restoring would chmod the target)" "$(! archive_list "$(archive)" 's3cret export pw' | tr ' ' '\n' | grep -qx '\./'; echo $?)" "$(archive_list "$(archive)" 's3cret export pw')"
+check "a wrong password does not decrypt it" "$([ -z "$(archive_list "$(archive)" wrong)" ]; echo $?)" "decrypted with a wrong password"
+check "staging folder removed" "$([ -z "$(ls -A "$SP/sbx/tmp")" ]; echo $?)" "$(ls -A "$SP/sbx/tmp")"
+check "no .part file left" "$([ -z "$(find "$SP/sbx/att" -name '*.part')" ]; echo $?)" "$(find "$SP/sbx/att" -name '*.part')"
+check "password never in gpg's arguments" "$(! grep -q 's3cret' "$SP/sbx/gpgargs"; echo $?)" "$(cat "$SP/sbx/gpgargs")"
+check "summary says encrypted archive" "$(grep -q '^Attachments: 3 saved, 0 failed (encrypted archive)$' "$SP/sbx/output"; echo $?)" "$(grep '^Attachments' "$SP/sbx/output")"
+
+echo "=== T48: ENCRYPT_ATTACHMENTS without EXPORT_PASSWORD stops before touching the CLI ==="
+setup ""
+export BW_REAL_PW=correct-pw ENCRYPT_ATTACHMENTS=true EXP=''
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says why" "$(grep -q 'ENCRYPT_ATTACHMENTS is on, but EXPORT_PASSWORD is not set' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
+check "no bw calls made" "$([ ! -s "$SP/sbx/calls" ]; echo $?)" "$(cat "$SP/sbx/calls")"
+
+echo "=== T49: ENCRYPT_ATTACHMENTS values ==="
+setup ""
+export BW_REAL_PW=correct-pw
+rc=$(export ENCRYPT_ATTACHMENTS=maybe; run)
+check "an unknown value is an error" "$([ "$rc" = 1 ] && grep -q 'ENCRYPT_ATTACHMENTS must be true or false' "$SP/sbx/output"; echo $?)" "rc=$rc"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+for v in false FALSE no off 0 ''; do
+  setup ""; export BW_REAL_PW=correct-pw BW_ITEMS_FILE="$SP/sbx/items.json"
+  printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+  rc=$(export ENCRYPT_ATTACHMENTS="$v"; run)
+  check "'$v' keeps plain attachments, as before" "$([ "$rc" = 0 ] && compgen -G "$SP/sbx/att/*/Doc/a.pdf" >/dev/null && [ -z "$(archive)" ]; echo $?)" "rc=$rc $(find "$SP/sbx/att" -type f)"
+done
+setup ""; export BW_REAL_PW=correct-pw BW_ITEMS_FILE="$SP/sbx/items.json"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+rc=$(export ENCRYPT_ATTACHMENTS=YES; run)
+check "'YES' encrypts" "$([ "$rc" = 0 ] && [ -s "$(archive)" ] && [ "$(plain_attachments)" = 0 ]; echo $?)" "rc=$rc $(find "$SP/sbx/att" -type f)"
+setup ""; export BW_REAL_PW=correct-pw
+rc=$(export ENCRYPT_ATTACHMENTS=true; run)
+check "no attachments: no archive, still exit 0" "$([ "$rc" = 0 ] && [ -z "$(archive)" ] && grep -q 'No attachments exist' "$SP/sbx/output"; echo $?)" "rc=$rc"
+
+echo "=== T50: a failed download is still encrypted around, and the run fails ==="
+setup ""
+mkdir -p "$SP/sbx/tmp"
+export BW_REAL_PW=correct-pw ENCRYPT_ATTACHMENTS=true BW_FAIL_ATTACH=bad.txt TMPDIR="$SP/sbx/tmp"
+printf '%s' '[{"id":"i1","name":"Ok","attachments":[{"fileName":"good.txt"},{"fileName":"bad.txt"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "the good one is in the archive" "$(archive_list "$(archive)" exp | grep -q 'Ok/good.txt'; echo $?)" "$(archive_list "$(archive)" exp)"
+check "no plain attachment in the volume" "$([ "$(plain_attachments)" = 0 ]; echo $?)" "$(find "$SP/sbx/att" -type f)"
+check "staging folder removed" "$([ -z "$(ls -A "$SP/sbx/tmp")" ]; echo $?)" "$(ls -A "$SP/sbx/tmp")"
+unset BW_FAIL_ATTACH
+
+echo "=== T51: if encryption fails nothing is kept in the clear, and the run fails ==="
+setup ""
+mkdir -p "$SP/sbx/tmp" "$SP/sbx/badgpg"
+# It writes part of its output first, as a gpg killed or out of space would.
+cat > "$SP/sbx/badgpg/gpg" <<'GPG'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do [ "$1" = --output ] && printf 'partial' > "$2"; shift; done
+echo "gpg: encryption failed" >&2
+exit 2
+GPG
+chmod +x "$SP/sbx/badgpg/gpg"
+export BW_REAL_PW=correct-pw ENCRYPT_ATTACHMENTS=true TMPDIR="$SP/sbx/tmp" KEEP_LAST_BACKUPS=1
+mkdir -p "$SP/sbx/att/20200101000000-bw-export"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(PATH="$SP/sbx/badgpg:$PATH" run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "says so" "$(grep -q 'attachments could not be encrypted' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
+check "no archive and no plain file anywhere" "$([ -z "$(archive)" ] && [ "$(plain_attachments)" = 0 ] && [ -z "$(ls -A "$SP/sbx/tmp")" ]; echo $?)" "$(find "$SP/sbx/att" "$SP/sbx/tmp")"
+check "no half-written archive left" "$([ -z "$(find "$SP/sbx/att" -name '*.part')" ]; echo $?)" "$(find "$SP/sbx/att" -name '*.part')"
+check "older backups not rotated out" "$([ -d "$SP/sbx/att/20200101000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/att")"
+check "summary reports it" "$(grep -q '^Attachments: 1 saved, 0 failed (encryption FAILED, none kept)$' "$SP/sbx/output"; echo $?)" "$(grep '^Attachments' "$SP/sbx/output")"
+unset KEEP_LAST_BACKUPS
+
+echo "=== T52: KEEP_GFS rotates both folders by day, week and month ==="
+setup ""
+export BW_REAL_PW=correct-pw KEEP_GFS=2d:1m
+for d in 20200101000000 20200102000000 20200115000000 20200201000000 20200202000000; do
+  mkdir -p "$SP/sbx/out/$d-bw-export" "$SP/sbx/att/$d-bw-export"
+done
+# Not backups: never touched, whatever their name.
+mkdir -p "$SP/sbx/out/my-notes-bw-export" "$SP/sbx/out/20200101000000-bw-export/inner/20190101000000-bw-export"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(tail -5 "$SP/sbx/output")"
+# Kept: this run (today, its own day and month) and 2020-02-02 (the 2nd day).
+check "vault folders kept" "$([ "$(find "$SP/sbx/out" -mindepth 1 -maxdepth 1 -name '2020*' | sort | xargs -n1 basename | paste -sd' ' -)" = "20200202000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
+check "attachment folders kept" "$([ "$(find "$SP/sbx/att" -mindepth 1 -maxdepth 1 -name '2020*' | sort | xargs -n1 basename | paste -sd' ' -)" = "20200202000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/att")"
+check "this run's folders kept" "$(exported; echo $?)" "$(ls "$SP/sbx/out")"
+check "a folder that only looks like one kept" "$([ -d "$SP/sbx/out/my-notes-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
+check "summary counts the deletions" "$(grep -q '^Old backups deleted: 8$' "$SP/sbx/output"; echo $?)" "$(grep '^Old backups' "$SP/sbx/output")"
+
+echo "=== T53: an invalid KEEP_GFS still backs up, deletes nothing and fails ==="
+setup ""
+export BW_REAL_PW=correct-pw KEEP_GFS=7days KEEP_LAST_BACKUPS=1
+mkdir -p "$SP/sbx/out/20200101000000-bw-export"
+rc=$(run)
+check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "the export was written" "$(exported; echo $?)" "$(ls "$SP/sbx/out")"
+check "nothing deleted" "$([ -d "$SP/sbx/out/20200101000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
+check "says why" "$(grep -q 'KEEP_GFS:7days is not valid' "$SP/sbx/output" && grep -q 'old backups were not rotated' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
+unset KEEP_GFS KEEP_LAST_BACKUPS
+
+echo "=== T54: KEEP_LAST_BACKUPS keeps its meaning, and a folder name with spaces is safe ==="
+setup ""
+export BW_REAL_PW=correct-pw KEEP_LAST_BACKUPS=2
+mkdir -p "$SP/sbx/out/20200101000000-bw-export" "$SP/sbx/out/20200102000000-bw-export" "$SP/sbx/out/a b-bw-export"
+rc=$(run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "only the oldest went" "$([ ! -d "$SP/sbx/out/20200101000000-bw-export" ] && [ -d "$SP/sbx/out/20200102000000-bw-export" ] && [ -d "$SP/sbx/out/a b-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
+check "rejects a non-number as before" "$(export KEEP_LAST_BACKUPS=x; rc=$(run); [ "$rc" = 1 ] && grep -q 'KEEP_LAST_BACKUPS:x is not a number' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
+unset KEEP_LAST_BACKUPS
+
+echo "=== T55: the summary says what the run did ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach" BW_FAIL_ATTACH=bad.txt
+export BW_ORGS_JSON='[{"id":"o1","name":"Mine","status":2,"type":0},{"id":"o2","name":"Shared","status":2,"type":2}]'
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"},{"fileName":"bad.txt"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+summary=$(sed -n '/^----- Summary -----$/,/^-------------------$/p' "$SP/sbx/output")
+check "exit 1 (an attachment failed)" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+check "has a duration" "$(grep -qE '^Duration: [0-9]+s$' <<<"$summary"; echo $?)" "$summary"
+check "personal vault" "$(grep -qx 'Personal vault: exported (encrypted)' <<<"$summary"; echo $?)" "$summary"
+check "organizations" "$(grep -qx 'Organizations: 1 exported, 1 skipped, 0 failed' <<<"$summary"; echo $?)" "$summary"
+check "attachments" "$(grep -qx 'Attachments: 1 saved, 1 failed (unencrypted)' <<<"$summary"; echo $?)" "$summary"
+check "has a size" "$(grep -qE '^Backup size: [0-9.]+[KMGT]?i?B$' <<<"$summary"; echo $?)" "$summary"
+check "errors come after it" "$([ "$(grep -n 'attachment(s) are missing' "$SP/sbx/output" | cut -d: -f1)" -gt "$(grep -n '^-------------------$' "$SP/sbx/output" | cut -d: -f1)" ]; echo $?)" "$(tail -8 "$SP/sbx/output")"
+unset BW_FAIL_ATTACH BW_ORGS_JSON
+setup ""
+export BW_REAL_PW=correct-pw BW_FAIL_EXPORT=personal BW_ORGANIZATIONS_LIST=none EXP=''
+rc=$(run)
+summary=$(sed -n '/^----- Summary -----$/,/^-------------------$/p' "$SP/sbx/output")
+check "a failed personal export" "$(grep -qx 'Personal vault: FAILED' <<<"$summary"; echo $?)" "$summary"
+check "BW_ORGANIZATIONS_LIST=none" "$(grep -qx 'Organizations: none (BW_ORGANIZATIONS_LIST=none)' <<<"$summary"; echo $?)" "$summary"
+setup ""
+export BW_REAL_PW=correct-pw EXP=''
+rc=$(run)
+check "unencrypted vault" "$(grep -qx 'Personal vault: exported (unencrypted)' "$SP/sbx/output"; echo $?)" "$(grep '^Personal' "$SP/sbx/output")"
+check "no summary when login fails" "$(export BW_FAIL_LOGIN=1; run >/dev/null; ! grep -q 'Summary' "$SP/sbx/output"; echo $?)" "printed one"
+unset BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST
+
 
 echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
 setup ""

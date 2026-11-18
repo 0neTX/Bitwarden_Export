@@ -41,10 +41,32 @@ run_once() {
     }
     trap ping_on_exit EXIT
 
-    # The failure notification: the end of the current run log only (never
-    # trailing lines from previous runs in append mode).
+    # The run summary bw_export.sh prints between two marker lines (duration,
+    # what was exported, size), without the markers. Empty when the run ended
+    # before printing one, such as a failed login.
+    run_summary () {
+        sed -n '/^----- Summary -----$/,/^-------------------$/{
+            /^----- Summary -----$/d
+            /^-------------------$/d
+            p
+        }' "$run_log" 2>/dev/null
+    }
+
+    # The failure notification: the summary, if the run got that far, then the
+    # end of the current run log only (never trailing lines from previous runs in
+    # append mode), without the summary a second time.
     send_notification () {
-        send_message "$(tail -n 15 "$run_log" 2>/dev/null)"
+        local summary tail_lines
+        summary=$(run_summary)
+        tail_lines=$(sed '/^----- Summary -----$/,/^-------------------$/d' "$run_log" 2>/dev/null | tail -n 15)
+        if [[ -n "$summary" ]]; then
+            send_message "Bitwarden/Vaultwarden Export: Failed ❌
+$summary
+
+$tail_lines"
+        else
+            send_message "$tail_lines"
+        fi
     }
 
     # Resolved, not just set: a secret file that is empty or not mounted sends
@@ -165,7 +187,10 @@ $(tail -n 5 <<<"$infisical_output")"
     if [[ "$return" -ne "0" ]]; then
         send_notification
     else
-        send_message "Bitwarden/Vaultwarden Export: Successfully completed ✅"
+        local summary
+        summary=$(run_summary)
+        send_message "Bitwarden/Vaultwarden Export: Successfully completed ✅${summary:+
+$summary}"
     fi
 
     # Report what the export actually did. Without this the container always exited

@@ -39,6 +39,17 @@ if ! . "$SECRETS_LIB"; then
     exit 1
 fi
 
+# For the run summary at the end.
+run_started=$SECONDS
+
+# Which old backups a rotation deletes (KEEP_LAST_BACKUPS, KEEP_GFS).
+RETENTION_LIB="${RETENTION_LIB:-/usr/local/lib/bw-export/retention.sh}"
+# shellcheck disable=SC1090,SC1091
+if ! . "$RETENTION_LIB"; then
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not load $RETENTION_LIB."
+    exit 1
+fi
+
 echo Starting ...
 #Set locations to save export files
 if [[ -z "${OUTPUT_PATH}" ]]; then
@@ -188,6 +199,32 @@ else
     fi
 fi
 
+# Attachments are saved as plain files unless ENCRYPT_ATTACHMENTS is on. Then
+# they are packed into one archive encrypted with EXPORT_PASSWORD, and are never
+# written in the clear to the attachments volume. Without a password there is
+# nothing to encrypt with, so the run stops here rather than fall back to plain
+# files the user asked not to have.
+attachments_encryption=0
+case "${ENCRYPT_ATTACHMENTS,,}" in
+    "" | false | no | off | 0) ;;
+    true | yes | on | 1)
+        if [[ -z $password1 ]]; then
+            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: ENCRYPT_ATTACHMENTS is on, but EXPORT_PASSWORD is not set. The attachments are encrypted with it."
+            params_validated=-1
+        elif ! command -v gpg >/dev/null 2>&1; then
+            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: ENCRYPT_ATTACHMENTS is on, but gpg is not installed."
+            params_validated=-1
+        else
+            attachments_encryption=1
+            echo -e "\n$(date '+%F %T') ${Cyan}Info: Attachments will be saved as one archive encrypted with EXPORT_PASSWORD."
+        fi
+        ;;
+    *)
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: ENCRYPT_ATTACHMENTS must be true or false, not \"${ENCRYPT_ATTACHMENTS}\"."
+        params_validated=-1
+        ;;
+esac
+
 # Check if required parameters has beed proviced.
 if [[ $params_validated != 0 ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}One or more required environment variables have not been set."
@@ -201,6 +238,12 @@ session_closed=0
 # Close the Bitwarden CLI session and wipe the credentials from the environment.
 # Idempotent: safe to call explicitly and from the EXIT trap.
 close_session() {
+    # Plain attachments waiting to be encrypted never outlive the run, however
+    # it ends. Outside the guard: the explicit call below comes first.
+    if [[ -n ${attachments_staging:-} ]]; then
+        rm -rf "$attachments_staging"
+        attachments_staging=""
+    fi
     if [[ $session_closed -ne 0 ]]; then
         return 0
     fi
@@ -354,6 +397,46 @@ else
     echo "$(date '+%F %T') Exporting personal vault to a password-encrypted file..."
     run_export "personal vault" --format encrypted_json --output "$runtime_save_folder"
 fi
+personal_exported=$((exports_failed == 0))
+
+# True when every argument is 0: for checking each command of a pipeline.
+all_zero() {
+    local status
+    for status in "$@"; do
+        [[ $status -eq 0 ]] || return 1
+    done
+}
+
+# Packs the folder $1 into the archive $2, encrypted with EXPORT_PASSWORD, then
+# decrypts it again to prove it can be restored. gpg's own symmetric format, so
+# "gpg -d" restores it on any system. The password goes through a pipe on fd 3,
+# never on a command line, and gpg gets a keyring of its own that is thrown away.
+# The archive is written under a .part name and renamed once verified, so a run
+# stopped halfway never leaves a truncated archive that looks like a good one.
+encrypt_folder() {
+    local src="$1" archive="$2" part="$2.part" gpg_home rc=0
+    local -a gpg_args
+    gpg_home=$(mktemp -d) || return 1
+    gpg_args=(--homedir "$gpg_home" --batch --quiet --no-tty --yes
+        --pinentry-mode loopback --passphrase-fd 3)
+    # The folder's entries rather than "." itself: an archive holding "./"
+    # would reset the permissions of whatever folder it is restored into.
+    find "$src" -mindepth 1 -maxdepth 1 -printf '%P\0' |
+        tar -C "$src" --null -T - -czf - |
+        gpg "${gpg_args[@]}" --symmetric --cipher-algo AES256 --compress-algo none \
+            --output "$part" 3< <(printf '%s' "$password1")
+    all_zero "${PIPESTATUS[@]}" || rc=1
+    if [[ $rc -eq 0 ]]; then
+        gpg "${gpg_args[@]}" --decrypt "$part" 3< <(printf '%s' "$password1") | tar -tzf - >/dev/null
+        all_zero "${PIPESTATUS[@]}" || rc=1
+    fi
+    [[ $rc -eq 0 ]] && { mv -f "$part" "$archive" || rc=1; }
+    # gpg starts an agent for that keyring; stop it rather than leave it behind.
+    gpgconf --homedir "$gpg_home" --kill gpg-agent >/dev/null 2>&1 || true
+    rm -rf "$gpg_home"
+    rm -f "$part"
+    return "$rc"
+}
 
 # 2. Download all attachments (file backup)
 # Item and file names are attacker-controlled: anyone who can put an item in a
@@ -365,6 +448,8 @@ fi
 # separators, and NTFS (this image is commonly bind-mounted onto Windows
 # volumes) rejects < > : " | ? * and trailing dots or spaces outright.
 attachments_failed=0
+attachments_saved=0
+archive_failed=0
 items_listed=1
 if ! items_json=$(bw list items); then
     listings_failed=$((listings_failed + 1))
@@ -377,6 +462,18 @@ fi
 if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]]; then
     echo
     echo "$(date '+%F %T') Saving attachments..."
+    # To be encrypted, they are downloaded to a private folder inside the
+    # container first, so no plain copy ever reaches the attachments volume (or
+    # a snapshot of it). close_session removes that folder.
+    attachments_target=$runtime_save_folder_attachments
+    if [[ $attachments_encryption -eq 1 ]]; then
+        if ! attachments_staging=$(mktemp -d "${TMPDIR:-/tmp}/bw-export-attachments.XXXXXX"); then
+            attachments_staging=""
+            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not create a temporary folder for the attachments."
+            exit 1
+        fi
+        attachments_target=$attachments_staging/
+    fi
     # The loop runs in this shell (process substitution, not a pipe), so the
     # count survives it. A failed download is only reported by the CLI's exit
     # status; on stdout it looks much like a successful one.
@@ -388,8 +485,10 @@ if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]];
         [[ -n "$saved" ]] && printf '%s\n' "$saved"
         if [[ $rc -ne 0 ]]; then
             attachments_failed=$((attachments_failed + 1))
+        else
+            attachments_saved=$((attachments_saved + 1))
         fi
-    done < <(jq -r --arg dir "$runtime_save_folder_attachments" '
+    done < <(jq -r --arg dir "$attachments_target" '
         .[] | . as $item | (.attachments // [])[] | . as $attachment
         | (($item.name // "")
            | gsub("[/<>:\"\\\\|?*[:cntrl:]]"; "_")
@@ -402,6 +501,23 @@ if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]];
         echo -e "\n$(date '+%F %T') ${IYellow}ERROR: $attachments_failed attachment(s) could not be saved."
         echo "$(date '+%F %T') A reverse proxy that intercepts /attachments/ is a common cause: the"
         echo "$(date '+%F %T') CLI is handed a login page and cannot decrypt it. Check that path is reachable."
+    fi
+    # What was saved is encrypted even when some downloads failed: a partial
+    # backup is still worth keeping, and the run is reported as incomplete anyway.
+    # If encryption fails there is no plain fallback; the run fails instead.
+    if [[ $attachments_encryption -eq 1 ]] && [[ $attachments_saved -gt 0 ]]; then
+        echo "$(date '+%F %T') Encrypting the attachments..."
+        attachments_archive="${runtime_save_folder_attachments%/}/attachments.tar.gz.gpg"
+        if encrypt_folder "$attachments_staging" "$attachments_archive"; then
+            echo "$(date '+%F %T') Saved $attachments_archive"
+        else
+            archive_failed=1
+            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: The attachments could not be encrypted, so none were kept."
+        fi
+    fi
+    if [[ -n $attachments_staging ]]; then
+        rm -rf "$attachments_staging"
+        attachments_staging=""
     fi
 elif [[ $items_listed -eq 1 ]]; then
     echo
@@ -442,6 +558,8 @@ org_export_blocker='def blocker:
 orgs_json='[]'
 orgs_listed=0
 organizations_skipped=0
+organizations_exported=0
+organizations_failed=0
 if [[ $organizations_none -eq 1 ]]; then
     :
 elif [[ $organization_list == "" ]]; then
@@ -495,7 +613,10 @@ if [[ -n "$organization_list" ]]; then
             echo "$(date '+%F %T') Exporting organization vault to a password-encrypted file..."
             run_export "organization vault $org_id" --organizationid "$org_id" --format encrypted_json --output "$runtime_save_folder"
         fi
-        if [[ $exports_failed -gt $failed_before ]]; then
+        if [[ $exports_failed -eq $failed_before ]]; then
+            organizations_exported=$((organizations_exported + 1))
+        else
+            organizations_failed=$((organizations_failed + 1))
             org_reason=$(jq -r --arg id "$org_id" "$org_export_blocker"'
                 first(.[] | select(.id == $id) | blocker) // ""' <<<"$orgs_json" 2>/dev/null) || org_reason=""
             if [[ -n "$org_reason" ]]; then
@@ -522,46 +643,100 @@ fi
 echo
 close_session
 
-# Rotation deletes the oldest backup to make room for this one. When this one is
+# Rotation deletes old backups to make room for this one. When this one is
 # missing a vault or attachments that trades a complete backup for an incomplete
 # one, and repeated often enough it leaves nothing complete at all. A failed
 # export may still have left its (empty) folder behind, which rotation would
 # count as a backup.
-if [ -n "${KEEP_LAST_BACKUPS}" ] && [[ $((exports_failed + listings_failed + attachments_failed)) -gt 0 ]]; then
+#
+# KEEP_LAST_BACKUPS keeps the N newest backups. KEEP_GFS ("7d:4w:6m") keeps the
+# newest backup of each recent day, week, month and year, so a deletion noticed
+# weeks later can still be undone. Set both and a backup either one keeps is
+# kept. See retention.sh.
+backups_deleted=0
+retention_failed=0
+failures=$((exports_failed + listings_failed + attachments_failed + archive_failed))
+
+# $1: the folder holding the backups. $2: what they are, for the log.
+rotate_folder() {
+    local folder="$1" what="$2" doomed name
+    doomed=$(find "$folder" -mindepth 1 -maxdepth 1 -type d -name '*-bw-export' -printf '%f\n' |
+        backups_to_delete "${KEEP_LAST_BACKUPS}" "${KEEP_GFS}") || return 1
+    [[ -n $doomed ]] || return 0
+    while IFS= read -r name; do
+        echo -e "$(date '+%F %T') ${Blue} Deleting exported $what: ${folder%/}/$name"
+        rm -rf "${folder:?}/${name:?}"
+        backups_deleted=$((backups_deleted + 1))
+    done <<<"$doomed"
+}
+
+if [[ -n "${KEEP_LAST_BACKUPS}${KEEP_GFS}" ]] && [[ $failures -gt 0 ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}Warning: keeping all previous backups."
     echo "$(date '+%F %T') This export is incomplete, so no older backup is rotated out for it."
     echo "$(date '+%F %T') Fix the failure and run again."
-elif [ -n "${KEEP_LAST_BACKUPS}" ]; then
-    echo "$(date '+%F %T') $(date '+%F %T') Starting cleaning previous backups..."
-    echo
-    re='^[0-9]+$'
-    if ! [[ ${KEEP_LAST_BACKUPS} =~ $re ]]; then
+elif [[ -n "${KEEP_LAST_BACKUPS}${KEEP_GFS}" ]]; then
+    echo "$(date '+%F %T') Starting cleaning previous backups..."
+    if [[ -n ${KEEP_LAST_BACKUPS} ]] && ! [[ ${KEEP_LAST_BACKUPS} =~ ^[0-9]+$ ]]; then
         echo -e "\n$(date '+%F %T') ${IYellow}ERROR: KEEP_LAST_BACKUPS:${KEEP_LAST_BACKUPS} is not a number" >&2
-        exit 1
+        retention_failed=1
     fi
-    keep_backups="${KEEP_LAST_BACKUPS}"
-    # Deleting vault exportings directories
-    actual_num_backups=$(find "$save_folder" -path "*-bw-export" -type d | sort | wc -l)
-    echo -e "\n$(date '+%F %T') ${Cyan}Info: Nº backups: $actual_num_backups"
-    echo -e "$(date '+%F %T') ${Cyan}Info: Max Nº backups: $keep_backups"
-    if [[ $actual_num_backups -gt $keep_backups ]]; then
-        for F in $(find "$save_folder" -path "*-bw-export" -type d | sort | head -"$(("$actual_num_backups" - "$keep_backups"))"); do
-            echo -e "$(date '+%F %T') ${Blue} Deleting exported vault:$F"
-            rm -rf "$F"
-        done
+    if [[ -n ${KEEP_GFS} ]] && ! gfs_parse "${KEEP_GFS}" >/dev/null; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: KEEP_GFS:${KEEP_GFS} is not valid. Use counts of days, weeks, months and years, e.g. 7d:4w:6m" >&2
+        retention_failed=1
     fi
-    # Deleteting attachment exporting directories
-    actual_num_backups=$(find "$save_folder_attachments" -path "*-bw-export" -type d | sort | wc -l)
-    if [[ $actual_num_backups -gt $keep_backups ]]; then
-        echo -e "\n$(date '+%F %T') ${Cyan}Info: Nº backups: $actual_num_backups"
-        echo -e "$(date '+%F %T') ${Cyan}Info: Max Nº backups: $keep_backups"
-        for F in $(find "$save_folder_attachments" -path "*-bw-export" -type d | sort | head -$(("$actual_num_backups" - "$keep_backups"))); do
-            echo -e "$(date '+%F %T') ${Blue} Deleting exported attachment:$F"
-            rm -rf "$F"
-        done
+    if [[ $retention_failed -eq 0 ]]; then
+        [[ -n ${KEEP_LAST_BACKUPS} ]] && echo -e "$(date '+%F %T') ${Cyan}Info: Keeping the last ${KEEP_LAST_BACKUPS} backup(s)."
+        if [[ -n ${KEEP_GFS} ]]; then
+            read -r gfs_d gfs_w gfs_m gfs_y <<<"$(gfs_parse "${KEEP_GFS}")"
+            echo -e "$(date '+%F %T') ${Cyan}Info: Keeping the newest backup of each of the last $gfs_d day(s), $gfs_w week(s), $gfs_m month(s) and $gfs_y year(s)."
+        fi
+        rotate_folder "$save_folder" "vault" || retention_failed=1
+        rotate_folder "$save_folder_attachments" "attachment" || retention_failed=1
+        if [[ $retention_failed -ne 0 ]]; then
+            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not work out which old backups to delete, so none were."
+        fi
     fi
-    echo "$(date '+%F %T') $(date '+%F %T') Finish clean previous backups..."
+    echo "$(date '+%F %T') Finish clean previous backups... ($backups_deleted deleted)"
 fi
+
+# What this run did, for the log and for the notification, which reads the
+# block between the two marker lines. Printed before the final errors so a
+# failure's notification still ends with them.
+format_duration() {
+    local s=$1
+    if ((s >= 3600)); then
+        printf '%dh %dm %ds' $((s / 3600)) $((s % 3600 / 60)) $((s % 60))
+    elif ((s >= 60)); then
+        printf '%dm %ds' $((s / 60)) $((s % 60))
+    else
+        printf '%ds' "$s"
+    fi
+}
+backup_bytes=$(du -sb "$runtime_save_folder" "$runtime_save_folder_attachments" 2>/dev/null | awk '{ n += $1 } END { print n + 0 }')
+backup_size=$(numfmt --to=iec-i --suffix=B "$backup_bytes" 2>/dev/null) || backup_size="$backup_bytes bytes"
+if [[ $password1 == "" ]]; then vault_mode="unencrypted"; else vault_mode="encrypted"; fi
+if [[ $personal_exported -eq 1 ]]; then personal_line="exported ($vault_mode)"; else personal_line="FAILED"; fi
+if [[ $organizations_none -eq 1 ]]; then
+    organizations_line="none (BW_ORGANIZATIONS_LIST=none)"
+else
+    organizations_line="$organizations_exported exported, $organizations_skipped skipped, $organizations_failed failed"
+fi
+attachments_line="$attachments_saved saved, $attachments_failed failed"
+if [[ $archive_failed -ne 0 ]]; then
+    attachments_line+=" (encryption FAILED, none kept)"
+elif [[ $attachments_saved -gt 0 ]]; then
+    if [[ $attachments_encryption -eq 1 ]]; then attachments_line+=" (encrypted archive)"; else attachments_line+=" (unencrypted)"; fi
+fi
+echo
+echo "----- Summary -----"
+echo "Duration: $(format_duration $((SECONDS - run_started)))"
+echo "Personal vault: $personal_line"
+echo "Organizations: $organizations_line"
+echo "Attachments: $attachments_line"
+[[ ${trash_count:-0} -gt 0 ]] && echo "Trash (not exported): $trash_count item(s)"
+echo "Backup size: $backup_size"
+[[ -n "${KEEP_LAST_BACKUPS}${KEEP_GFS}" ]] && echo "Old backups deleted: $backups_deleted"
+echo "-------------------"
 
 # A missing vault export or attachment is an incomplete backup, so say so and
 # fail. Silence here is what let a broken backup look healthy run after run.
@@ -574,8 +749,16 @@ fi
 if [[ $attachments_failed -gt 0 ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Exporting finished, but $attachments_failed attachment(s) are missing."
 fi
-if [[ $((exports_failed + listings_failed + attachments_failed)) -gt 0 ]]; then
+if [[ $archive_failed -gt 0 ]]; then
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Exporting finished, but the attachments could not be encrypted."
+fi
+if [[ $failures -gt 0 ]]; then
     echo "$(date '+%F %T') This backup is incomplete."
+    echo
+    exit 1
+fi
+if [[ $retention_failed -ne 0 ]]; then
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: The backup is complete, but old backups were not rotated."
     echo
     exit 1
 fi

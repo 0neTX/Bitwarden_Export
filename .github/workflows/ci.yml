@@ -26,9 +26,10 @@ jobs:
             bw_export.sh entrypoint.sh root/usr/local/lib/bw-export/ping.sh \
             root/usr/local/lib/bw-export/notify.sh \
             root/usr/local/lib/bw-export/secrets.sh \
+            root/usr/local/lib/bw-export/retention.sh \
             tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
             tests/run_notify_tests.sh tests/run_cron_tests.sh \
-            tests/run_secrets_tests.sh \
+            tests/run_secrets_tests.sh tests/run_retention_tests.sh \
             tests/e2e-setup.sh tests/e2e-verify.sh
 
       # 116 assertions against a stateful mock of the Bitwarden CLI. This covers
@@ -55,6 +56,11 @@ jobs:
       # Assertions against resolve_secret() in root/usr/local/lib/bw-export/secrets.sh.
       - name: secrets suite
         run: bash tests/run_secrets_tests.sh
+
+      # Which old backups KEEP_LAST_BACKUPS and KEEP_GFS delete, driven through
+      # retention.sh directly with folder names.
+      - name: retention suite
+        run: bash tests/run_retention_tests.sh
 
   build:
     name: docker build

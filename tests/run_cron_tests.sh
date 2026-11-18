@@ -36,6 +36,11 @@ if [ -n "${BW_EXPORT_FAIL_ON_TAG:-}" ] && [ "${BW_EXPORT_TAG:-}" = "$BW_EXPORT_F
   exit 1
 fi
 echo "log-line:${BW_EXPORT_TAG:-run}"
+# The summary block bw_export.sh prints near the end of a run.
+if [ -n "${BW_EXPORT_SUMMARY:-}" ]; then
+  printf '\n----- Summary -----\nDuration: 3s\nAttachments: 2 saved, 0 failed\n-------------------\n'
+  [ "${BW_EXPORT_RC:-0}" != 0 ] && echo "ERROR: after-summary-error"
+fi
 exit "${BW_EXPORT_RC:-0}"
 STUB
 
@@ -184,6 +189,27 @@ eq "ping start sent"     "1" "$(grep -c '^ping:https://hc.example/start$' "$SBX/
 eq "ping 0 sent"         "1" "$(grep -c '^ping:https://hc.example/0$' "$SBX/calls")"
 eq "notify started"      "1" "$(grep -c '^notify:Bitwarden/Vaultwarden Export: Started$' "$SBX/calls")"
 eq "notify completed"    "1" "$(grep -c '^notify:Bitwarden/Vaultwarden Export: Successfully completed' "$SBX/calls")"
+
+echo "=== C7b: the notifications carry the run summary ==="
+reset
+rc=$(unset CRON; BW_EXPORT_SUMMARY=1 NOTIFICATION_URL="telegram://tok@telegram?chats=1" run_entry)
+eq "exit 0"                    "0" "$rc"
+eq "success keeps its headline" "Bitwarden/Vaultwarden Export: Successfully completed ✅" "$(head -n 1 "$SBX/last_notify")"
+eq "success carries the summary" "Duration: 3s|Attachments: 2 saved, 0 failed" "$(sed -n '2,3p' "$SBX/last_notify" | paste -sd'|' -)"
+eq "without the marker lines"  "0" "$(grep -c '^-----' "$SBX/last_notify")"
+reset
+rc=$(unset CRON; BW_EXPORT_SUMMARY=1 BW_EXPORT_RC=1 NOTIFICATION_URL="telegram://tok@telegram?chats=1" run_entry)
+eq "exit 1"                    "1" "$rc"
+eq "failure has a headline"    "Bitwarden/Vaultwarden Export: Failed ❌" "$(head -n 1 "$SBX/last_notify")"
+eq "failure carries the summary" "1" "$(grep -c '^Attachments: 2 saved, 0 failed$' "$SBX/last_notify")"
+eq "and the log's last lines"  "1" "$(grep -c 'ERROR: after-summary-error' "$SBX/last_notify")"
+eq "summary not repeated"      "1" "$(grep -c '^Duration: 3s$' "$SBX/last_notify")"
+reset
+rc=$(unset CRON; BW_EXPORT_RC=1 NOTIFICATION_URL="telegram://tok@telegram?chats=1" run_entry)
+eq "no summary: the log's last lines, as before" "log-line:run" "$(head -n 1 "$SBX/last_notify")"
+reset
+rc=$(unset CRON; NOTIFICATION_URL="telegram://tok@telegram?chats=1" run_entry)
+eq "no summary: success message as before" "Bitwarden/Vaultwarden Export: Successfully completed ✅" "$(cat "$SBX/last_notify")"
 
 echo "=== C8: flock prevents overlapping scheduled runs ==="
 reset
