@@ -155,6 +155,8 @@ The Bitwarden CLI cannot export items in your **Trash** or your **password histo
 
 ## Configuration
 
+Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`, `EXPORT_PASSWORD`, `NOTIFICATION_URL`, `PING_URL`) can be given instead as `NAME_FILE`, the path of a file holding it. See [Option A: Docker secrets](#option-a-docker-secrets).
+
 ### Required
 
 | Variable | Description |
@@ -205,18 +207,67 @@ Any user on the host can read the command line of any process with `ps`, includi
 - the master password (`BW_PASSWORD`) reaches `bw unlock` through an environment variable (`--passwordenv`), which only the process owner and root can read;
 - the export password (`EXPORT_PASSWORD`) reaches `bw export` through stdin, answering the CLI's own prompt. That prompt is kept out of the log, since it is redrawn once per character and would give away the password's length.
 
-Nothing has to be configured for this. Every credential variable accepts either the value itself or **the path of a file holding it**, which is what makes the two options below work.
+Nothing has to be configured for this. Each of the six secret-carrying variables (`BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`, `EXPORT_PASSWORD`, `NOTIFICATION_URL` and `PING_URL`) also has a **`_FILE` variant**, such as `BW_PASSWORD_FILE`, that holds the path of a file with the value: the convention of the official Docker images (`POSTGRES_PASSWORD_FILE` and the like). With files, the container's configuration holds only paths, so `docker inspect` shows no secret. A value is read only when it is used, and handed only to the program that needs it.
+
+- **`NAME_FILE`** is always a path. A file that does not exist, cannot be read or is empty is reported: for a credential the run stops, and a notification or ping URL is skipped with a warning. Setting both `NAME` and `NAME_FILE` is the same kind of error.
+- **`NAME`** keeps working as before: the value itself, or the path of a file holding it. A path under `/run/secrets` that does not exist is treated as a secret that was not mounted, never as a literal value.
+- If `EXPORT_PASSWORD` or `EXPORT_PASSWORD_FILE` is set but no password can be read from it, the run fails: the vault is never exported unencrypted in its place.
 
 ### Option A: Docker secrets
 
 ```bash
 mkdir ./.secrets
-echo '<client id>'     > ./.secrets/.bwclientid
-echo '<client secret>' > ./.secrets/.bwsecret
-echo '<password>'      > ./.secrets/.bwpassword
+echo '<client id>'        > ./.secrets/.bwclientid
+echo '<client secret>'    > ./.secrets/.bwsecret
+echo '<master password>'  > ./.secrets/.bwpassword
+echo '<export password>'  > ./.secrets/.exportpassword
+# Optional, only if you use them:
+echo '<shoutrrr url>'     > ./.secrets/.notificationurl
+echo '<ping url>'         > ./.secrets/.pingurl
 ```
 
-Then configure and run [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Reference: [Docker secrets in Compose](https://docs.docker.com/compose/use-secrets/).
+The notification and ping secrets are optional. Leave their lines commented out unless you created their files: Compose refuses to start with a secret whose file does not exist.
+
+```yaml
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - BW_CLIENTID_FILE=/run/secrets/bwclientid
+      - BW_CLIENTSECRET_FILE=/run/secrets/bwsecret
+      - BW_PASSWORD_FILE=/run/secrets/bwpassword
+      - EXPORT_PASSWORD_FILE=/run/secrets/exportpassword
+      # Optional:
+      # - NOTIFICATION_URL_FILE=/run/secrets/notificationurl
+      # - PING_URL_FILE=/run/secrets/pingurl
+    secrets:
+      - bwclientid
+      - bwsecret
+      - bwpassword
+      - exportpassword
+      # - notificationurl
+      # - pingurl
+
+secrets:
+  bwclientid:
+    file: ./.secrets/.bwclientid
+  bwsecret:
+    file: ./.secrets/.bwsecret
+  bwpassword:
+    file: ./.secrets/.bwpassword
+  exportpassword:
+    file: ./.secrets/.exportpassword
+  # notificationurl:
+  #   file: ./.secrets/.notificationurl
+  # pingurl:
+  #   file: ./.secrets/.pingurl
+```
+
+See [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Reference: [Docker secrets in Compose](https://docs.docker.com/compose/use-secrets/).
 
 ### Option B: Infisical
 

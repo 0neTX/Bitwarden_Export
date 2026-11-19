@@ -47,7 +47,9 @@ run_once() {
         send_message "$(tail -n 15 "$run_log" 2>/dev/null)"
     }
 
-    if [[ -n "${NOTIFICATION_URL}" ]]; then
+    # Resolved, not just set: a secret file that is empty or not mounted sends
+    # nothing. Its warning comes from send_message, so it is not repeated here.
+    if [[ -n "$(resolve_secret NOTIFICATION_URL 2>/dev/null)" ]]; then
         echo -e "\n${Cyan}Notifications enabled."
     fi
     send_message "Bitwarden/Vaultwarden Export: Started"

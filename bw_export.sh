@@ -30,6 +30,15 @@ UCyan='\033[4;36m'   # Cyan
 UWhite='\033[4;37m'  # White
 Blue='\033[0;34m'    # Blue
 
+# Overridable like entrypoint.sh's PING_LIB and NOTIFY_LIB, so the tests can
+# point it at the repository. Without it no credential can be read at all.
+SECRETS_LIB="${SECRETS_LIB:-/usr/local/lib/bw-export/secrets.sh}"
+# shellcheck disable=SC1090
+if ! . "$SECRETS_LIB"; then
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not load $SECRETS_LIB, exiting..."
+    exit 1
+fi
+
 echo Starting ...
 #Set locations to save export files
 if [[ -z "${OUTPUT_PATH}" ]]; then
@@ -99,49 +108,46 @@ fi
 #Set Bitwarden session authentication.
 # To obtain your organization_id value, open a terminal and type:
 #   bw login #(follow the prompts);
-if [[ -z "${BW_CLIENTID}" ]]; then
+if ! secret_is_set BW_CLIENTID; then
 
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTID enviroment variable not provided, exiting..."
-
-    echo -n "$(date '+%F %T') Your Bitwarden Personal API Key can be obtain in:"
-    echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
-    params_validated=-1
-else
-    if test -f "${BW_CLIENTID}"; then
-        client_id=$(<"${BW_CLIENTID}")
-    else
-        client_id="${BW_CLIENTID}"
-    fi
-
-fi
-
-if [[ -z "${BW_CLIENTSECRET}" ]]; then
-
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTSECRET enviroment variable not provided, exiting..."
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_CLIENTID nor BW_CLIENTID_FILE is set, exiting..."
 
     echo -n "$(date '+%F %T') Your Bitwarden Personal API Key can be obtain in:"
     echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
     params_validated=-1
 else
-    if test -f "${BW_CLIENTSECRET}"; then
-        client_secret=$(<"${BW_CLIENTSECRET}")
-    else
-        client_secret="${BW_CLIENTSECRET}"
+    client_id=$(resolve_secret BW_CLIENTID)
+    if [[ -z "$client_id" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTID is set, but no value could be read from it."
+        params_validated=-1
     fi
-
 fi
 
-if [[ -z "${BW_PASSWORD}" ]]; then
+if ! secret_is_set BW_CLIENTSECRET; then
 
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_PASSWORD enviroment variable not provided, exiting..."
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_CLIENTSECRET nor BW_CLIENTSECRET_FILE is set, exiting..."
+
+    echo -n "$(date '+%F %T') Your Bitwarden Personal API Key can be obtain in:"
+    echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
+    params_validated=-1
+else
+    client_secret=$(resolve_secret BW_CLIENTSECRET)
+    if [[ -z "$client_secret" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTSECRET is set, but no value could be read from it."
+        params_validated=-1
+    fi
+fi
+
+if ! secret_is_set BW_PASSWORD; then
+
+    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_PASSWORD nor BW_PASSWORD_FILE is set, exiting..."
 
     params_validated=-1
 else
-
-    if test -f "${BW_PASSWORD}"; then
-        bw_password=$(<"${BW_PASSWORD}")
-    else
-        bw_password="${BW_PASSWORD}"
+    bw_password=$(resolve_secret BW_PASSWORD)
+    if [[ -z "$bw_password" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_PASSWORD is set, but no value could be read from it."
+        params_validated=-1
     fi
 fi
 
@@ -159,7 +165,7 @@ elif [[ -z "${BW_ORGANIZATIONS_LIST}" ]]; then
 fi
 
 #Check export password
-if [[ -z "${EXPORT_PASSWORD}" ]]; then
+if ! secret_is_set EXPORT_PASSWORD; then
 
     echo
     echo -e "\n$(date '+%F %T') ${IYellow}-------------------------------------------------------------------------------------------------------------"
@@ -169,11 +175,16 @@ if [[ -z "${EXPORT_PASSWORD}" ]]; then
     password1=""
 
 else
-    echo -e "\n$(date '+%F %T') ${Cyan}Info:  Be sure to save your EXPORT_PASSWORD in a safe place!"
-    if test -f "${EXPORT_PASSWORD}"; then
-        password1=$(<"${EXPORT_PASSWORD}")
+    password1=$(resolve_secret EXPORT_PASSWORD)
+    if [[ -n "$password1" ]]; then
+        echo -e "\n$(date '+%F %T') ${Cyan}Info:  Be sure to save your EXPORT_PASSWORD in a safe place!"
     else
-        password1="${EXPORT_PASSWORD}"
+        # Set means an encrypted export was asked for. Falling back to a plain
+        # one wrote the whole vault to disk unencrypted and reported success,
+        # for instance when Docker had made a folder of a missing secret file.
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: EXPORT_PASSWORD is set, but no password could be read from it."
+        echo -e "$(date '+%F %T') ${IYellow}The vault is not exported unencrypted in its place."
+        params_validated=-1
     fi
 fi
 
@@ -181,7 +192,7 @@ fi
 if [[ $params_validated != 0 ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}One or more required environment variables have not been set."
     echo -e "${IYellow}Please check the required environment variables:"
-    echo -e "${IYellow}BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD"
+    echo -e "${IYellow}BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD and, if set, EXPORT_PASSWORD"
     exit 1
 fi
 
@@ -205,8 +216,9 @@ close_session() {
 echo "$(date '+%F %T') $(date '+%F %T') Starting exporting..."
 echo
 
-BW_CLIENTID=$client_id
-BW_CLIENTSECRET=$client_secret
+# bw login --apikey reads them from the environment. Exported explicitly: given
+# through BW_CLIENTID_FILE, they were never in the environment to begin with.
+export BW_CLIENTID="$client_id" BW_CLIENTSECRET="$client_secret"
 
 # From here on the CLI holds state, so never leave a session behind: a leftover
 # session makes every later run fail at "bw config server" and at "bw unlock".

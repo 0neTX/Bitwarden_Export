@@ -25,8 +25,10 @@ jobs:
           docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 \
             bw_export.sh entrypoint.sh root/usr/local/lib/bw-export/ping.sh \
             root/usr/local/lib/bw-export/notify.sh \
+            root/usr/local/lib/bw-export/secrets.sh \
             tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
             tests/run_notify_tests.sh tests/run_cron_tests.sh \
+            tests/run_secrets_tests.sh \
             tests/e2e-setup.sh tests/e2e-verify.sh
 
       # 116 assertions against a stateful mock of the Bitwarden CLI. This covers
@@ -49,6 +51,10 @@ jobs:
       # Assertions against entrypoint.sh (CRON scheduling and one-shot compatibility).
       - name: cron suite
         run: bash tests/run_cron_tests.sh
+
+      # Assertions against resolve_secret() in root/usr/local/lib/bw-export/secrets.sh.
+      - name: secrets suite
+        run: bash tests/run_secrets_tests.sh
 
   build:
     name: docker build

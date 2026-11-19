@@ -35,6 +35,12 @@ case "$1" in
 
   login)
     [ -n "$BW_FAIL_LOGIN" ] && { echo "mock: login failed" >&2; exit 1; }
+    # Like the real CLI with --apikey --nointeraction: the key comes from the
+    # environment, so a value the caller did not export is not there.
+    if [ -z "${BW_CLIENTID:-}" ] || [ -z "${BW_CLIENTSECRET:-}" ]; then
+      echo "client_id and client_secret are required." >&2; exit 1
+    fi
+    echo "APIKEY=$BW_CLIENTID:$BW_CLIENTSECRET" >> "$LOG"
     if [ "$auth" = 1 ]; then echo "You are already logged in" >&2; exit 1; fi
     auth=1; locked=1; cached_pw="${BW_REAL_PW:?}"; save; exit 0 ;;
 
