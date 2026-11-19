@@ -36,8 +36,11 @@ machine can still fail CI. Use the same container:
 
 ```bash
 docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 \
-  bw_export.sh entrypoint.sh \
-  tests/mock/bw tests/run_tests.sh tests/e2e-setup.sh tests/e2e-verify.sh
+  bw_export.sh entrypoint.sh root/usr/local/lib/bw-export/ping.sh \
+  root/usr/local/lib/bw-export/notify.sh root/usr/local/lib/bw-export/retention.sh \
+  tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
+  tests/run_notify_tests.sh tests/run_cron_tests.sh tests/run_retention_tests.sh \
+  tests/e2e-setup.sh tests/e2e-verify.sh
 ```
 
 If a suppression is unavoidable, put it at the top of the file with a comment

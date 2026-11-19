@@ -1,0 +1,73 @@
+# A hardened profile for a container that stays up (CRON) holding full access
+# to the vault: no root, no capabilities, no writable image, credentials as
+# Docker secrets rather than environment variables.
+#
+# Before the first start:
+#   1. The export folders must belong to the user below:
+#        mkdir -p export/data export/attachments
+#        sudo chown -R 1000:1000 export
+#   2. One file per secret, readable by that user and nobody else:
+#        mkdir -p .secrets && chmod 700 .secrets
+#        printf '%s' '<client_id>'       > .secrets/.bwclientid
+#        printf '%s' '<client_secret>'   > .secrets/.bwsecret
+#        printf '%s' '<master password>' > .secrets/.bwpassword
+#        printf '%s' '<export password>' > .secrets/.exportpassword
+#        chmod 400 .secrets/.* && sudo chown -R 1000:1000 .secrets
+#
+#   docker compose -f docker-compose.hardened.sample.yml up -d
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    restart: unless-stopped
+
+    # Never root: the user setup and "su" are skipped, and PUID/PGID are not
+    # used. Files are created as this uid:gid.
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # The only writable place outside the volumes. It holds the CLI's session
+    # (tokens never touch the disk), the run log and, with ENCRYPT_ATTACHMENTS,
+    # one run's attachments before they are encrypted: size it to fit them.
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    pids_limit: 200
+
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    secrets:
+      - bwclientid
+      - bwsecret
+      - bwpassword
+      - exportpassword
+    environment:
+      # Credentials (required), read from the secret files.
+      - BW_CLIENTID_FILE=/run/secrets/bwclientid
+      - BW_CLIENTSECRET_FILE=/run/secrets/bwsecret
+      - BW_PASSWORD_FILE=/run/secrets/bwpassword
+      # Encryption: exports and attachments.
+      - EXPORT_PASSWORD_FILE=/run/secrets/exportpassword
+      - ENCRYPT_ATTACHMENTS=true
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
+      # Schedule.
+      - CRON=0 3 * * *
+      - TZ=Europe/Madrid
+      # Retention: daily for a week, weekly for a month, monthly for half a year.
+      - KEEP_GFS=7d:4w:6m
+      # Log: with the exports, not in the tmpfs, which is lost on restart.
+      - FILE_LOG=/var/data/bw-export-logfile.log
+
+secrets:
+  bwclientid:
+    file: ./.secrets/.bwclientid
+  bwsecret:
+    file: ./.secrets/.bwsecret
+  bwpassword:
+    file: ./.secrets/.bwpassword
+  exportpassword:
+    file: ./.secrets/.exportpassword

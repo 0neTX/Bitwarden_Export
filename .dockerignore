@@ -67,3 +67,5 @@ export/
 .secrets
 docker-compose.prod.yml
 docker-compose.*.yml
+# Private compose files with credentials never reach the build context.
+private

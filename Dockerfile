@@ -49,14 +49,15 @@ ARG DEBIAN_FRONTEND=noninteractive
 # procps provides pkill, which the entrypoint needs to pass a container stop on
 # to the export. ca-certificates backs the TLS downloads below. The base image
 # happens to ship both; declare them so a slimmer base cannot drop them
-# silently.
+# silently. gnupg encrypts the attachments when ENCRYPT_ATTACHMENTS is on;
+# today it also arrives with the Infisical installer, but that is not ours to rely on.
 #
 # The Infisical installer is fetched to a file instead of piped into bash: the
 # old Cloudsmith endpoint now answers 404, and in a pipeline curl's failure was
 # swallowed (no pipefail under /bin/sh), so bash ran an empty script, exited 0,
 # and the build died two lines later on a misleading "package not found".
 RUN apt-get update && \
-    apt-get install -y bash curl unzip jq wget procps ca-certificates tzdata && \
+    apt-get install -y bash curl unzip jq wget procps ca-certificates tzdata gnupg && \
     curl -fsSL 'https://artifacts-cli.infisical.com/setup.deb.sh' \
         -o /tmp/infisical-setup.sh && \
     bash /tmp/infisical-setup.sh && \

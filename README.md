@@ -24,6 +24,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Examples](#examples)
 - [What it produces](#what-it-produces)
 - [Configuration](#configuration)
 - [Handling secrets](#handling-secrets)
@@ -31,7 +32,10 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 - [Monitoring](#monitoring)
 - [Scheduling](#scheduling)
 - [Retention](#retention)
+- [Encrypted attachments](#encrypted-attachments)
+- [Off-site copy (3-2-1)](#off-site-copy-3-2-1)
 - [File ownership: PUID and PGID](#file-ownership-puid-and-pgid)
+- [Hardened setup](#hardened-setup)
 - [Platform notes](#platform-notes)
 - [Image tags](#image-tags)
 - [Troubleshooting](#troubleshooting)
@@ -47,12 +51,14 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 
 - Exports your **personal vault** to JSON, plain or password-encrypted.
 - Exports your **organization vaults** (every one you own or administer, or the ones you list).
-- Downloads **file attachments**, one subfolder per vault item. Attachments are never encrypted.
+- Downloads **file attachments**, one subfolder per vault item, or packs them into **one encrypted archive** with `ENCRYPT_ATTACHMENTS` ([details](#encrypted-attachments)).
 - Keeps **passwords off the command line**, so other users on the host cannot read them with `ps` ([details](#passwords-stay-off-the-command-line)).
 - Reads its credentials from **Docker secrets** or from **[Infisical](#option-b-infisical)** instead of the compose file.
-- Sends the outcome to any platform supported by **[Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/)** (Telegram, Gotify, and about thirty more).
+- Sends the outcome to any platform supported by **[Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/)** (Telegram, Gotify, and about thirty more), with a **summary** of what was backed up.
 - Pings a **watchdog** (healthchecks, uptime-kuma, any dead man's switch) at start and on completion.
-- **Prunes old exports** automatically with `KEEP_LAST_BACKUPS`.
+- **Prunes old exports** automatically: the last N with `KEEP_LAST_BACKUPS`, or daily/weekly/monthly with `KEEP_GFS` ([details](#retention)).
+- Pairs with an **rclone sidecar** for an off-site copy ([details](#off-site-copy-3-2-1)).
+- Runs **without root**, with a read-only filesystem and no capabilities, for a container that stays up with `CRON` ([details](#hardened-setup)).
 - Exits with the export's own status code, so `restart: on-failure`, cron and orchestrators see a failed backup as a failure.
 
 ## Requirements
@@ -66,7 +72,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 
 ### Docker Compose (recommended)
 
-Copy [`docker-compose.yml`](docker-compose.yml) from this repository, fill in the three credentials and run it:
+Copy [`docker-compose.yml`](docker-compose.yml) from this repository, fill in the three credentials and the export password, and run it:
 
 ```yaml
 services:
@@ -74,16 +80,18 @@ services:
     container_name: bw-export
     image: 0netx/bw-export:latest
     volumes:
-      - ./export:/var/data
-      - ./export:/var/attachments
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
     environment:
       - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
       - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
       - BW_PASSWORD=<BITWARDEN PASSWORD>
-      - EXPORT_PASSWORD=<password the export will be encrypted with>
-      # Optional: your own Vaultwarden/Bitwarden server
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      # Server: leave commented out for bitwarden.com.
       # - BW_URL_SERVER=https://vault.example.com
 ```
+
+The file lists every other option, commented out.
 
 ```bash
 docker compose up
@@ -109,7 +117,8 @@ services:
       - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
       - BW_PASSWORD=<BITWARDEN PASSWORD>
       - EXPORT_PASSWORD=<EXPORT PASSWORD>
-      - BW_URL_SERVER=https://vault.example.com
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
       - CRON=0 3 * * *
       - TZ=Europe/Madrid
       - KEEP_LAST_BACKUPS=5
@@ -143,13 +152,42 @@ The script can also be run directly from a terminal, which prompts for what it n
 bash bw_export.sh
 ```
 
+## Examples
+
+Each example is a complete compose file. They go from the simplest to the most complete; start with the first and move on when you need what the next one adds.
+
+| File | What it adds | Start with |
+|---|---|---|
+| [`docker-compose.yml`](docker-compose.yml) | One backup, then exit. Lists every option, commented out. | `docker compose up` |
+| [`docker-compose.cron.sample.yml`](docker-compose.cron.sample.yml) | Backups on a schedule, with retention. See [Scheduling](#scheduling). | `docker compose -f docker-compose.cron.sample.yml up -d` |
+| [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml) | Credentials as Docker secrets. See [Option A](#option-a-docker-secrets). | `docker compose -f docker-compose.secrets.sample.yml up` |
+| [`docker-compose.infisical.sample.yml`](docker-compose.infisical.sample.yml) | Credentials from Infisical. See [Option B](#option-b-infisical). | `docker compose -f docker-compose.infisical.sample.yml up` |
+| [`docker-compose.hardened.sample.yml`](docker-compose.hardened.sample.yml) | Schedule and secrets, without root, capabilities or a writable image. See [Hardened setup](#hardened-setup). | `docker compose -f docker-compose.hardened.sample.yml up -d` |
+| [`docker-compose.offsite.sample.yml`](docker-compose.offsite.sample.yml) | A second copy off the host with an rclone sidecar. See [Off-site copy](#off-site-copy-3-2-1). | `docker compose -f docker-compose.offsite.sample.yml up -d` |
+| [`compose.podman.yml`](compose.podman.yml) | Not standalone: an override for rootless Podman, added to any of the above. See [Rootless Podman](#rootless-podman). | `podman compose -f docker-compose.yml -f compose.podman.yml up` |
+
+All of them write the exports to `./export/data` and the attachments to `./export/attachments`, next to the compose file, and leave `BW_URL_SERVER` commented out, which means bitwarden.com.
+
 ## What it produces
 
 Every run writes a dated folder, `<DateTime>-bw-export`, into the output path:
 
 - a JSON file with your **personal vault** (password-encrypted when `EXPORT_PASSWORD` is set — recommended),
 - a JSON file per **organization vault**, if you export any,
-- a folder with your **attachments**, one subfolder per vault item.
+- a folder with your **attachments**, one subfolder per vault item, or a single `attachments.tar.gz.gpg` when `ENCRYPT_ATTACHMENTS` is on.
+
+The log ends with a summary of the run, which is also what the [notification](#notifications) carries:
+
+```text
+----- Summary -----
+Duration: 41s
+Personal vault: exported (encrypted)
+Organizations: 1 exported, 1 skipped, 0 failed
+Attachments: 14 saved, 0 failed (encrypted archive)
+Backup size: 3.2MiB
+Old backups deleted: 1
+-------------------
+```
 
 The Bitwarden CLI cannot export items in your **Trash** or your **password history**, so neither is included.
 
@@ -180,6 +218,8 @@ Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `B
 | `OUTPUT_PATH` | `/var/data/` | Where the vault exports are written. The path must exist in the container, normally as a mounted volume. |
 | `ATTACHMENTS_PATH` | `/var/attachments/` | Where the attachments are written, same condition. |
 | `KEEP_LAST_BACKUPS` | keep everything | Keep only the N newest export folders, delete the rest. See [Retention](#retention). |
+| `KEEP_GFS` | — | Keep the newest export of each recent day, week, month and year, e.g. `7d:4w:6m`. Can be combined with `KEEP_LAST_BACKUPS`. See [Retention](#retention). |
+| `ENCRYPT_ATTACHMENTS` | `false` | `true` packs the attachments into one archive encrypted with `EXPORT_PASSWORD`, which must then be set. See [Encrypted attachments](#encrypted-attachments). |
 | `FILE_LOG` | container-only log | Path of the run log, e.g. `/var/data/bw-export-logfile.log`. Point it inside a mounted volume or it is lost with the container. When `CRON` is enabled, appends across runs and rotates to `<FILE_LOG>.1` at 100 MiB. |
 | `CRON` | — (one-shot) | Standard 5-field cron expression (e.g. `0 3 * * *`) or macro (`@daily`, `@hourly`, etc., powered by `supercronic`). Validates the expression on startup (exiting `1` if invalid), runs an initial backup immediately, and keeps running for scheduled backups (skipping overlapping runs; if the initial backup fails, the scheduler keeps running). Recommended: set `restart: unless-stopped`. |
 | `TZ` | `UTC` | Timezone for logs and `CRON` schedules (e.g. `Europe/Madrid`, `America/New_York`). |
@@ -216,7 +256,7 @@ Nothing has to be configured for this. Each of the six secret-carrying variables
 ### Option A: Docker secrets
 
 ```bash
-mkdir ./.secrets
+mkdir -p ./.secrets && chmod 700 ./.secrets
 echo '<client id>'        > ./.secrets/.bwclientid
 echo '<client secret>'    > ./.secrets/.bwsecret
 echo '<master password>'  > ./.secrets/.bwpassword
@@ -224,6 +264,7 @@ echo '<export password>'  > ./.secrets/.exportpassword
 # Optional, only if you use them:
 echo '<shoutrrr url>'     > ./.secrets/.notificationurl
 echo '<ping url>'         > ./.secrets/.pingurl
+chmod 400 ./.secrets/.*
 ```
 
 The notification and ping secrets are optional. Leave their lines commented out unless you created their files: Compose refuses to start with a secret whose file does not exist.
@@ -267,6 +308,8 @@ secrets:
   #   file: ./.secrets/.pingurl
 ```
 
+Mount `/var/data` and `/var/attachments` separately, never a parent such as `/var`: the image declares both as volumes, so Docker would put anonymous volumes over them and the exports would never reach your folder.
+
 See [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Reference: [Docker secrets in Compose](https://docs.docker.com/compose/use-secrets/).
 
 ### Option B: Infisical
@@ -281,7 +324,7 @@ See [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Re
    ![Service token](docs/assets/infisical2.png)
    ![Service token](docs/assets/infisical3.png)
 
-4. Set `INFISICAL_TOKEN` to that token and `INFISICAL_PATH` to its *Secrets Path*, then start the container as usual.
+4. Set `INFISICAL_TOKEN` to that token, then start the container as usual. `INFISICAL_PATH` is optional: the token's own *Secrets Path* always applies (see below).
 
    ![Compose sample](docs/assets/infisical4.png)
 
@@ -296,7 +339,7 @@ See also [`docker-compose.infisical.sample.yml`](docker-compose.infisical.sample
 
 ## Notifications
 
-Set `NOTIFICATION_URL` to any [Shoutrrr service URL](https://shoutrrr.nickfedor.com/latest/services/overview/) and you get a message when the run starts, succeeds or fails; a failure carries the last lines of the log. The URL usually holds a token, so the container never prints it and hands it to Shoutrrr through the environment rather than on its command line. A notification that cannot be sent is logged without the address and does not change the backup's exit code.
+Set `NOTIFICATION_URL` to any [Shoutrrr service URL](https://shoutrrr.nickfedor.com/latest/services/overview/) and you get a message when the run starts, succeeds or fails. Both outcomes carry the [run summary](#what-it-produces) (duration, what was exported, organizations skipped, attachments saved, size), so a drop in the numbers shows without opening the log; a failure also carries the last lines of the log. The URL usually holds a token, so the container never prints it and hands it to Shoutrrr through the environment rather than on its command line. A notification that cannot be sent is logged without the address and does not change the backup's exit code.
 
 ### Telegram
 
@@ -374,6 +417,59 @@ Each run writes its own `<DateTime>-bw-export` folder. With `KEEP_LAST_BACKUPS` 
 
 ![Keep last sample](docs/assets/keep-last.png)
 
+A fixed window has a weakness: with daily backups and `KEEP_LAST_BACKUPS=7`, an item deleted by mistake and noticed two weeks later is gone from every backup. `KEEP_GFS` keeps backups spread over time instead (grandfather-father-son):
+
+```yaml
+environment:
+  - KEEP_GFS=7d:4w:6m
+```
+
+| Unit | Keeps |
+|---|---|
+| `d` | the newest backup of each of the last N days that have one |
+| `w` | the newest of each of the last N weeks (ISO weeks, Monday to Sunday) |
+| `m` | the newest of each of the last N months |
+| `y` | the newest of each of the last N years |
+
+With one backup a day, `7d:4w:6m` holds about 15 backups that reach six months back. Units can come in any order and any can be left out (`30d`, `4w:12m:2y`). When both variables are set, a backup either of them keeps is kept.
+
+Either way:
+
+- only folders named `<14 digits>-bw-export` directly inside the output and attachments paths are ever deleted;
+- the backup the run has just written is always kept, even with `KEEP_LAST_BACKUPS=0`;
+- when the run is incomplete, nothing is deleted, so a broken export never pushes a good one out;
+- an invalid value deletes nothing and makes the run exit `1` after the backup has been written.
+
+## Encrypted attachments
+
+`EXPORT_PASSWORD` encrypts the vault exports, but attachments (SSH keys, certificates, recovery codes, scanned documents) are saved as plain files. With `ENCRYPT_ATTACHMENTS=true` each run instead writes one `attachments.tar.gz.gpg` into its attachments folder, encrypted with `EXPORT_PASSWORD` (AES-256, OpenPGP format).
+
+```yaml
+environment:
+  - EXPORT_PASSWORD=<EXPORT PASSWORD>
+  - ENCRYPT_ATTACHMENTS=true
+```
+
+- The attachments are downloaded to a private temporary folder **inside the container** and only the encrypted archive reaches your volume, so no plain copy lands on the NAS or in its snapshots. That folder needs room for one run's attachments; it is deleted however the run ends.
+- Each archive is decrypted once after it is written, to prove it can be restored.
+- If encryption fails, the run fails and nothing is kept in the clear.
+- `EXPORT_PASSWORD` is required: without it the container stops before exporting anything.
+
+To restore, on any machine with GnuPG ([Gpg4win](https://www.gpg4win.org/) on Windows, [GPG Suite](https://gpgtools.org/) on macOS):
+
+```bash
+gpg -d attachments.tar.gz.gpg | tar -xz
+```
+
+GnuPG asks for the password, and the folders are recreated in the current directory, one per vault item.
+
+## Off-site copy (3-2-1)
+
+All backups live on one volume, so a failed disk, a stolen server or ransomware takes them all. The image does not upload anything itself; [`docker-compose.offsite.sample.yml`](docker-compose.offsite.sample.yml) adds an [rclone](https://rclone.org/) sidecar that copies the export folders to any of rclone's remotes (S3, Backblaze B2, WebDAV/Nextcloud, SFTP, Google Drive, …), keeping the remote's credentials out of the bw-export container.
+
+- Set `EXPORT_PASSWORD` and `ENCRYPT_ATTACHMENTS=true`, so everything that leaves the host is encrypted.
+- The sidecar mounts the backups **read-only** and uses `rclone copy`, which never deletes on the remote: a backup lost locally is still there. Expire old copies with the provider's lifecycle rules (ideally with versioning or object lock), not with `rclone sync`, which would mirror local deletions.
+
 ## File ownership: PUID and PGID
 
 Processes inside a container run as `root` by default, so every file created in a mounted volume ends up owned by `root` and out of your reach. `PUID` and `PGID` map the container's internal user onto a user on the host:
@@ -401,6 +497,29 @@ podman compose -f docker-compose.yml -f compose.podman.yml up
 With it, `PUID`/`PGID` behave exactly as under Docker. Without `PUID`, rootless Podman already writes the files as you, since the container's root is your user. The override is Podman only: Docker rejects `keep-id`.
 
 On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g. `./export:/var/data:z`, or the container cannot read them.
+
+## Hardened setup
+
+With `CRON` the container stays up around the clock, holding everything needed to open your vault. [`docker-compose.hardened.sample.yml`](docker-compose.hardened.sample.yml) runs it with as little as possible:
+
+| Setting | Effect |
+|---|---|
+| `user: "1000:1000"` | Never root. The user setup and `su` are skipped, and the files are created as that uid:gid. |
+| `read_only: true` | Nothing in the image can be modified. |
+| `tmpfs: /tmp` | The only writable place outside the volumes, in memory: the CLI's session data (so its tokens never touch the disk), the default log and, with `ENCRYPT_ATTACHMENTS`, one run's attachments before they are encrypted. Size it to fit them. |
+| `cap_drop: [ALL]`, `no-new-privileges` | No kernel capabilities, and no way to gain any. |
+| `secrets:` | `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` and `EXPORT_PASSWORD` are read from files through their `_FILE` variables instead of environment variables, so `docker inspect` does not show them. |
+
+What changes when the container does not start as root:
+
+- **`PUID`/`PGID` are ignored**: the `user:` setting already decides who owns the files, and the container says so if they are set.
+- **The mounted folders must be writable by that user**, e.g. `sudo chown -R 1000:1000 export`. A folder it cannot write to stops the run before anything is exported, naming the folder and the uid.
+- When the image's own folder cannot be written to (`read_only`, or any user other than the image's), the CLI's data and the default log move to `/tmp`. Set `FILE_LOG` inside a volume to keep the log across restarts.
+
+> [!NOTE]
+> **Rootless Podman** cannot start this file as is: with `read_only: true` it has nowhere to create the mount points for the Docker secrets under `/run/secrets`, and stops with `crun: open …/run/secrets/<name>: No such file or directory`. Under Podman set `read_only: false`; every other setting in the file works.
+
+`read_only` and `cap_drop: [ALL]` need `user:` as well. Started as root, the container sets its user up with `usermod` and `chown` and then switches to it with `su`, which a read-only filesystem and a capability-less container both prevent.
 
 ## Platform notes
 
@@ -439,6 +558,14 @@ Only a confirmed Owner or Admin, or a custom role allowed to, can export an orga
 - **You own or administer every organization you belong to, or you set `BW_ORGANIZATIONS_LIST`:** nothing changes.
 - **You belong to an organization as User or Manager:** the run stops failing, and your attachments and the organizations you do own are saved again. That organization's backup is the job of whoever owns it.
 - **You use bitwarden.com with a Custom role that may export:** the CLI does not show a custom role's permissions, so that organization is no longer exported on its own. Add its ID to `BW_ORGANIZATIONS_LIST`.
+
+### Rotation of old backups
+
+`KEEP_LAST_BACKUPS` works as before, with three safety fixes. Most setups see no difference.
+
+- Only `<14 digits>-bw-export` folders **directly** inside the output and attachments paths are deleted. Before, any folder whose name ended in `-bw-export` counted, at any depth, including a vault item's attachments folder with such a name.
+- A folder name with spaces no longer breaks the rotation.
+- `KEEP_LAST_BACKUPS=0` keeps the backup just written instead of deleting it.
 
 ### Attachments path
 

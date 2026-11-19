@@ -2,13 +2,22 @@
 
 Two layers:
 
-- **`run_tests.sh`** — 136 assertions against `bw_export.sh` using a stateful mock
+- **`run_tests.sh`** — 263 assertions against `bw_export.sh` using a stateful mock
   of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers.
-- **`run_ping_tests.sh`** — 33 assertions against the `PING_URL` helpers in
+- **`run_ping_tests.sh`** — 44 assertions against the `PING_URL` helpers in
   `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
   three-line stub for `curl`.
-- **`run_notify_tests.sh`** — 13 assertions against the `NOTIFICATION_URL` helper
+- **`run_notify_tests.sh`** — 24 assertions against the `NOTIFICATION_URL` helper
   in `root/usr/local/lib/bw-export/notify.sh`, with a stub for `shoutrrr`.
+- **`run_cron_tests.sh`** — 82 assertions against `entrypoint.sh`: `CRON`
+  scheduling and the one-shot mode, plus the non-root start.
+- **`run_secrets_tests.sh`** — 43 assertions against `resolve_secret()` in
+  `root/usr/local/lib/bw-export/secrets.sh`: values, `/run/secrets` paths and
+  the `_FILE` variables.
+- **`run_retention_tests.sh`** — 40 assertions against
+  `root/usr/local/lib/bw-export/retention.sh`, which decides the old backups
+  `KEEP_LAST_BACKUPS` and `KEEP_GFS` delete. Driven with folder names only;
+  nothing is created or deleted.
 - **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.4 and a
   bw-export image built from the repo `Dockerfile`, used to validate issue #21
   end to end.
@@ -19,7 +28,7 @@ Two layers:
 SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
 ```
 
-Expect `PASS=136 FAIL=0`. The suite is only worth anything if it fails on the
+Expect `PASS=263 FAIL=0`. The suite is only worth anything if it fails on the
 code it was written against, so as a control:
 
 ```bash

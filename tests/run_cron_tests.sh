@@ -25,6 +25,7 @@ cat > "$SBX/bw_export.sh" <<'STUB'
 #!/usr/bin/env bash
 d="${CRON_TEST_DIR:?}"
 echo "bw_export:${BW_EXPORT_TAG:-run}" >> "$d/calls"
+echo "env:APPDATA=${BITWARDENCLI_APPDATA_DIR-<unset>} HOME=${HOME-<unset>}" >> "$d/calls"
 if [ -n "${BW_EXPORT_SLEEP:-}" ]; then
   trap 'echo "bw_export:got_term" >> "$d/calls"; exit 143' TERM
   sleep "$BW_EXPORT_SLEEP" &
@@ -36,6 +37,11 @@ if [ -n "${BW_EXPORT_FAIL_ON_TAG:-}" ] && [ "${BW_EXPORT_TAG:-}" = "$BW_EXPORT_F
   exit 1
 fi
 echo "log-line:${BW_EXPORT_TAG:-run}"
+# The summary block bw_export.sh prints near the end of a run.
+if [ -n "${BW_EXPORT_SUMMARY:-}" ]; then
+  printf '\n----- Summary -----\nDuration: 3s\nAttachments: 2 saved, 0 failed\n-------------------\n'
+  [ "${BW_EXPORT_RC:-0}" != 0 ] && echo "ERROR: after-summary-error"
+fi
 exit "${BW_EXPORT_RC:-0}"
 STUB
 
@@ -110,8 +116,13 @@ run_entry() {
     export PATH="$SBX:$PATH"
     export CRONTAB_FILE="$SBX/crontab"
     export LOCK_FILE="$SBX/lock"
-    export LOGFILE_DEFAULT="$SBX/default.log"
-    export RUN_AS_USER=""
+    export LOGFILE_DEFAULT="${LOGFILE_DEFAULT-$SBX/default.log}"
+    [ -z "$LOGFILE_DEFAULT" ] && unset LOGFILE_DEFAULT
+    export RUN_AS_USER="${RUN_AS_USER_TEST-}"
+    # As root unless a test says otherwise, whoever runs the suite (CI does
+    # not run it as root), and with a writable image folder.
+    export ENTRYPOINT_UID="${ENTRYPOINT_UID_TEST:-0}"
+    export APP_DIR="${APP_DIR_TEST:-$SBX}"
     bash "$ENTRY"
   ) > "$SBX/stdout" 2>&1
   echo $?
@@ -184,6 +195,65 @@ eq "ping start sent"     "1" "$(grep -c '^ping:https://hc.example/start$' "$SBX/
 eq "ping 0 sent"         "1" "$(grep -c '^ping:https://hc.example/0$' "$SBX/calls")"
 eq "notify started"      "1" "$(grep -c '^notify:Bitwarden/Vaultwarden Export: Started$' "$SBX/calls")"
 eq "notify completed"    "1" "$(grep -c '^notify:Bitwarden/Vaultwarden Export: Successfully completed' "$SBX/calls")"
+
+echo "=== C7b: the notifications carry the run summary ==="
+reset
+rc=$(unset CRON; BW_EXPORT_SUMMARY=1 NOTIFICATION_URL="telegram://tok@telegram?chats=1" run_entry)
+eq "exit 0"                    "0" "$rc"
+eq "success keeps its headline" "Bitwarden/Vaultwarden Export: Successfully completed ✅" "$(head -n 1 "$SBX/last_notify")"
+eq "success carries the summary" "Duration: 3s|Attachments: 2 saved, 0 failed" "$(sed -n '2,3p' "$SBX/last_notify" | paste -sd'|' -)"
+eq "without the marker lines"  "0" "$(grep -c '^-----' "$SBX/last_notify")"
+reset
+rc=$(unset CRON; BW_EXPORT_SUMMARY=1 BW_EXPORT_RC=1 NOTIFICATION_URL="telegram://tok@telegram?chats=1" run_entry)
+eq "exit 1"                    "1" "$rc"
+eq "failure has a headline"    "Bitwarden/Vaultwarden Export: Failed ❌" "$(head -n 1 "$SBX/last_notify")"
+eq "failure carries the summary" "1" "$(grep -c '^Attachments: 2 saved, 0 failed$' "$SBX/last_notify")"
+eq "and the log's last lines"  "1" "$(grep -c 'ERROR: after-summary-error' "$SBX/last_notify")"
+eq "summary not repeated"      "1" "$(grep -c '^Duration: 3s$' "$SBX/last_notify")"
+reset
+rc=$(unset CRON; BW_EXPORT_RC=1 NOTIFICATION_URL="telegram://tok@telegram?chats=1" run_entry)
+eq "no summary: the log's last lines, as before" "log-line:run" "$(head -n 1 "$SBX/last_notify")"
+reset
+rc=$(unset CRON; NOTIFICATION_URL="telegram://tok@telegram?chats=1" run_entry)
+eq "no summary: success message as before" "Bitwarden/Vaultwarden Export: Successfully completed ✅" "$(cat "$SBX/last_notify")"
+
+echo "=== C14: started as a non-root user, the user setup and su are skipped ==="
+reset
+# RUN_AS_USER is the image's user, as in the real image: su to it would fail.
+rc=$(unset CRON; ENTRYPOINT_UID_TEST=1000 RUN_AS_USER_TEST=no-such-user run_entry)
+eq "exit 0"                     "0" "$rc"
+eq "adduser not run"            "0" "$(grep -c '^adduser$' "$SBX/calls")"
+eq "export ran, without su"     "1" "$(grep -c '^bw_export:run$' "$SBX/calls")"
+eq "says why"                   "1" "$(grep -c 'Running as uid 1000' "$SBX/stdout")"
+eq "no PUID warning unasked"    "0" "$(grep -c 'PUID and PGID are ignored' "$SBX/stdout")"
+reset
+rc=$(unset CRON; ENTRYPOINT_UID_TEST=1000 PUID=1000 PGID=1000 run_entry)
+eq "PUID set: warned it is ignored" "1" "$(grep -c 'PUID and PGID are ignored' "$SBX/stdout")"
+reset
+rc=$(CRON="0 3 * * *" ENTRYPOINT_UID_TEST=1000 RUN_AS_USER_TEST=no-such-user BW_EXPORT_TAG=startup run_entry)
+eq "CRON: startup run without su"   "1" "$(grep -c '^bw_export:startup$' "$SBX/calls")"
+eq "CRON: scheduled run without su" "1" "$(grep -c '^bw_export:scheduled$' "$SBX/calls")"
+eq "CRON: adduser not run"          "0" "$(grep -c '^adduser$' "$SBX/calls")"
+reset
+rc=$(unset CRON; ENTRYPOINT_UID_TEST=0 run_entry)
+eq "as root: adduser still runs"    "1" "$(grep -c '^adduser$' "$SBX/calls")"
+
+echo "=== C15: an image folder it cannot write to (read_only) moves CLI state and log to TMPDIR ==="
+reset; rm -rf "$SBX/tmp"; mkdir -p "$SBX/tmp"
+rc=$(unset CRON BITWARDENCLI_APPDATA_DIR; APP_DIR_TEST="$SBX/no-such-dir" TMPDIR="$SBX/tmp" LOGFILE_DEFAULT='' run_entry)
+eq "exit 0"                         "0" "$rc"
+eq "CLI state in TMPDIR"            "1" "$(grep -c "^env:APPDATA=$SBX/tmp/bitwarden-cli " "$SBX/calls")"
+eq "that folder is private"         "700" "$(stat -c %a "$SBX/tmp/bitwarden-cli" 2>/dev/null)"
+eq "default log in TMPDIR"          "1" "$(grep -c 'log-line:run' "$SBX/tmp/bw-export-logfile.log" 2>/dev/null)"
+reset
+rc=$(unset CRON; APP_DIR_TEST="$SBX/no-such-dir" TMPDIR="$SBX/tmp" BITWARDENCLI_APPDATA_DIR=/custom/state run_entry)
+eq "a BITWARDENCLI_APPDATA_DIR given is kept" "1" "$(grep -c '^env:APPDATA=/custom/state ' "$SBX/calls")"
+reset
+rc=$(unset CRON BITWARDENCLI_APPDATA_DIR; run_entry)
+eq "writable image folder: nothing moved" "1" "$(grep -c '^env:APPDATA=<unset> ' "$SBX/calls")"
+reset
+rc=$(unset CRON; HOME="$SBX/no-such-home" TMPDIR="$SBX/tmp" run_entry)
+eq "an unwritable HOME becomes TMPDIR" "1" "$(grep -c "HOME=$SBX/tmp$" "$SBX/calls")"
 
 echo "=== C8: flock prevents overlapping scheduled runs ==="
 reset
