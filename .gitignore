@@ -48,3 +48,5 @@ docker-compose.*.yml
 tests/e2e/
 tests/sbx/
 __pycache__/
+# Docker secrets for the compose samples (./secrets/<name>)
+secrets/

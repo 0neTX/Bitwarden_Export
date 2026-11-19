@@ -236,7 +236,7 @@ Nothing has to be configured for this. Each of the six secret-carrying variables
 ### Option A: Docker secrets
 
 ```bash
-mkdir ./.secrets
+mkdir -p ./.secrets && chmod 700 ./.secrets
 echo '<client id>'        > ./.secrets/.bwclientid
 echo '<client secret>'    > ./.secrets/.bwsecret
 echo '<master password>'  > ./.secrets/.bwpassword
@@ -244,6 +244,7 @@ echo '<export password>'  > ./.secrets/.exportpassword
 # Optional, only if you use them:
 echo '<shoutrrr url>'     > ./.secrets/.notificationurl
 echo '<ping url>'         > ./.secrets/.pingurl
+chmod 400 ./.secrets/.*
 ```
 
 The notification and ping secrets are optional. Leave their lines commented out unless you created their files: Compose refuses to start with a secret whose file does not exist.
@@ -286,6 +287,8 @@ secrets:
   # pingurl:
   #   file: ./.secrets/.pingurl
 ```
+
+Mount `/var/data` and `/var/attachments` separately, never a parent such as `/var`: the image declares both as volumes, so Docker would put anonymous volumes over them and the exports would never reach your folder.
 
 See [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Reference: [Docker secrets in Compose](https://docs.docker.com/compose/use-secrets/).
 

@@ -41,12 +41,19 @@ services:
       # Read-only: the sidecar can never alter or delete the local backups.
       - ./export:/data:ro
       - ./rclone:/config/rclone
+    environment:
+      # Both containers start together, so the first pass waits for bw-export's
+      # initial backup (about a minute) instead of finding nothing and leaving
+      # the first off-site copy for 6 hours later.
+      - FIRST_DELAY=900
     entrypoint: ["/bin/sh", "-c"]
-    # Every 6 hours. Files already on the remote are skipped, so a run with
-    # nothing new costs a listing only.
+    # Then every 6 hours. Files already on the remote are skipped, so a run with
+    # nothing new costs a listing only. Logs and half-written archives (.part)
+    # are never uploaded.
     command:
       - |
+        sleep "$${FIRST_DELAY:-900}"
         while true; do
-          rclone copy /data offsite:bw-export --exclude '*.log' --exclude '*.log.1' --log-level NOTICE
+          rclone copy /data offsite:bw-export --exclude '*.log' --exclude '*.log.1' --exclude '*.part' --log-level NOTICE
           sleep 21600
         done
