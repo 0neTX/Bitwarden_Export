@@ -112,9 +112,13 @@ COPY entrypoint.sh /entrypoint.sh
 COPY root/ /
 
 # Run multiple tasks
+# /app/bw is removed in this same layer once installed: left behind, the image
+# carried the ~137 MB binary twice, and nothing runs it from /app (bw resolves
+# to /usr/local/bin/bw). Deleting it in a later RUN would not shrink the image.
 RUN unzip /tmp/bw.zip && \
     chmod +x /app/bw && \
     install /app/bw /usr/local/bin/ && \
+    rm -f /app/bw && \
     chmod +x /etc/cont-init.d/10-adduser && \
     chmod +x /app/bw_export.sh && \
     chmod +x /entrypoint.sh && \
