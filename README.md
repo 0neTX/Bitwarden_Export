@@ -34,6 +34,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 - [Encrypted attachments](#encrypted-attachments)
 - [Off-site copy (3-2-1)](#off-site-copy-3-2-1)
 - [File ownership: PUID and PGID](#file-ownership-puid-and-pgid)
+- [Hardened setup](#hardened-setup)
 - [Platform notes](#platform-notes)
 - [Image tags](#image-tags)
 - [Troubleshooting](#troubleshooting)
@@ -56,6 +57,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 - Pings a **watchdog** (healthchecks, uptime-kuma, any dead man's switch) at start and on completion.
 - **Prunes old exports** automatically: the last N with `KEEP_LAST_BACKUPS`, or daily/weekly/monthly with `KEEP_GFS` ([details](#retention)).
 - Pairs with an **rclone sidecar** for an off-site copy ([details](#off-site-copy-3-2-1)).
+- Runs **without root**, with a read-only filesystem and no capabilities, for a container that stays up with `CRON` ([details](#hardened-setup)).
 - Exits with the export's own status code, so `restart: on-failure`, cron and orchestrators see a failed backup as a failure.
 
 ## Requirements
@@ -472,6 +474,26 @@ podman compose -f docker-compose.yml -f compose.podman.yml up
 With it, `PUID`/`PGID` behave exactly as under Docker. Without `PUID`, rootless Podman already writes the files as you, since the container's root is your user. The override is Podman only: Docker rejects `keep-id`.
 
 On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g. `./export:/var/data:z`, or the container cannot read them.
+
+## Hardened setup
+
+With `CRON` the container stays up around the clock, holding everything needed to open your vault. [`docker-compose.hardened.sample.yml`](docker-compose.hardened.sample.yml) runs it with as little as possible:
+
+| Setting | Effect |
+|---|---|
+| `user: "1000:1000"` | Never root. The user setup and `su` are skipped, and the files are created as that uid:gid. |
+| `read_only: true` | Nothing in the image can be modified. |
+| `tmpfs: /tmp` | The only writable place outside the volumes, in memory: the CLI's session data (so its tokens never touch the disk), the default log and, with `ENCRYPT_ATTACHMENTS`, one run's attachments before they are encrypted. Size it to fit them. |
+| `cap_drop: [ALL]`, `no-new-privileges` | No kernel capabilities, and no way to gain any. |
+| `secrets:` | `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` and `EXPORT_PASSWORD` are read from files instead of environment variables, so `docker inspect` does not show them. |
+
+What changes when the container does not start as root:
+
+- **`PUID`/`PGID` are ignored**: the `user:` setting already decides who owns the files, and the container says so if they are set.
+- **The mounted folders must be writable by that user**, e.g. `sudo chown -R 1000:1000 export`. A folder it cannot write to stops the run before anything is exported, naming the folder and the uid.
+- When the image's own folder cannot be written to (`read_only`, or any user other than the image's), the CLI's data and the default log move to `/tmp`. Set `FILE_LOG` inside a volume to keep the log across restarts.
+
+`read_only` and `cap_drop: [ALL]` need `user:` as well. Started as root, the container sets its user up with `usermod` and `chown` and then switches to it with `su`, which a read-only filesystem and a capability-less container both prevent.
 
 ## Platform notes
 

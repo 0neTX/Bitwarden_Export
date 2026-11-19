@@ -8,9 +8,39 @@ CRONTAB_FILE="${CRONTAB_FILE:-/tmp/bw-export.crontab}"
 LOCK_FILE="${LOCK_FILE:-/tmp/bw-export.lock}"
 RUN_AS_USER="${RUN_AS_USER-bitwarden}"
 FILE_LOG_MAX_BYTES="${FILE_LOG_MAX_BYTES:-104857600}"
+# Who this container was started as (overridable so the tests can pretend), and
+# the image's own folder, which only the image's user can write to.
+ENTRYPOINT_UID="${ENTRYPOINT_UID:-$(id -u)}"
+APP_DIR="${APP_DIR:-/app}"
 
 Yellow='\033[0;33m'       # Yellow
 Cyan='\033[0;36m'         # Cyan
+
+# Started as a user other than root (compose "user: 1000:1000"): there is no
+# user to switch to, and no permission to create one, so the export runs as
+# that user directly. This is what lets the container run with
+# "cap_drop: [ALL]" and "no-new-privileges".
+if [[ "$ENTRYPOINT_UID" -ne 0 ]]; then
+    RUN_AS_USER=""
+fi
+
+# Where the image keeps its own state is not writable with "read_only: true",
+# or for a user that is not the image's. The CLI's session data and the default
+# log then go to the temporary folder (a tmpfs in the hardened setup), which
+# also keeps the CLI's tokens off disk. Set by this, the first invocation, and
+# inherited by every scheduled run.
+if [[ ! -w "$APP_DIR" ]]; then
+    export LOGFILE_DEFAULT="${LOGFILE_DEFAULT:-${TMPDIR:-/tmp}/bw-export-logfile.log}"
+    if [[ -z "${BITWARDENCLI_APPDATA_DIR:-}" ]]; then
+        export BITWARDENCLI_APPDATA_DIR="${TMPDIR:-/tmp}/bitwarden-cli"
+        # Private: it holds the CLI's tokens while a run is logged in.
+        [[ -d "$BITWARDENCLI_APPDATA_DIR" ]] || mkdir -m 700 "$BITWARDENCLI_APPDATA_DIR" 2>/dev/null || true
+    fi
+fi
+# A uid with no entry in /etc/passwd gets HOME=/, which it cannot write to.
+if [[ ! -w "${HOME:-/}" ]]; then
+    export HOME="${TMPDIR:-/tmp}"
+fi
 
 # Monitoring pings (PING_URL), for healthchecks, uptime-kuma or any dead man's
 # switch. Deliberately independent of NOTIFICATION_URL: one tells a person, the
@@ -212,7 +242,19 @@ if [[ "${1:-}" == "--run-once" ]]; then
     run_once
 fi
 
-"$ADDUSER_BIN"
+if [[ "$ENTRYPOINT_UID" -eq 0 ]]; then
+    "$ADDUSER_BIN"
+else
+    # 10-adduser maps PUID/PGID onto the image's user and hands it the mounted
+    # folders; both need root. Here the container's own user already decides
+    # who owns the files, so the folders must simply be writable by it.
+    echo -e "\n${Cyan}Running as uid $ENTRYPOINT_UID (gid $(id -g)): user setup skipped."
+    echo -e "${Cyan}The mounted folders must be writable by this user."
+    if [[ -n "${PUID:-}${PGID:-}" ]]; then
+        echo -e "${Yellow}Warning: PUID and PGID are ignored when the container does not start as root."
+        echo -e "${Yellow}The user it runs as (compose \"user:\") already decides who owns the files."
+    fi
+fi
 
 if [[ -z "${CRON:-}" ]]; then
     run_once

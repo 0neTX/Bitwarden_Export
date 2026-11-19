@@ -102,6 +102,17 @@ else
     fi
 fi
 
+# A folder this user cannot write to fails every export with an error from the
+# CLI that does not name the cause. Running as a non-root user (compose
+# "user:"), the host folder's owner is the usual reason.
+for folder in "$save_folder" "$save_folder_attachments"; do
+    if [[ -d "$folder" ]] && [[ ! -w "$folder" ]]; then
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Cannot write to $folder as uid $(id -u)."
+        echo "$(date '+%F %T') Give that user write access to the host folder mounted there, e.g. chown $(id -u):$(id -g) <folder>."
+        params_validated=-1
+    fi
+done
+
 #Set Vaultwarden own server.
 # To obtain your organization_id value, open a terminal and type:
 #   bw login #(follow the prompts);

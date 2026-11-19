@@ -777,6 +777,20 @@ check "no summary when login fails" "$(export BW_FAIL_LOGIN=1; run >/dev/null; !
 unset BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST
 
 
+echo "=== T50: a folder this user cannot write to is named before anything runs ==="
+if [ "$(id -u)" = 0 ]; then
+  echo "  SKIP  root can write to any folder; run the suite as a normal user (CI does)"
+else
+  setup ""
+  export BW_REAL_PW=correct-pw
+  chmod 555 "$SP/sbx/out"
+  rc=$(run)
+  chmod 755 "$SP/sbx/out"
+  check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
+  check "names the folder and the uid" "$(grep -q "Cannot write to $SP/sbx/out as uid $(id -u)" "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
+  check "no bw calls made" "$([ ! -s "$SP/sbx/calls" ]; echo $?)" "$(cat "$SP/sbx/calls")"
+fi
+
 echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
 setup ""
 # The legacy /var/attachment fallback hinges on this, and rootful Docker cannot
