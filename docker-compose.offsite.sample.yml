@@ -23,14 +23,19 @@ services:
       - ./export/data:/var/data
       - ./export/attachments:/var/attachments
     environment:
+      # Credentials (required).
       - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
       - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
       - BW_PASSWORD=<BITWARDEN PASSWORD>
+      # Encryption: nothing readable leaves the host.
       - EXPORT_PASSWORD=<EXPORT PASSWORD>
       - ENCRYPT_ATTACHMENTS=true
-      - BW_URL_SERVER=https://vault.example.com
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
+      # Schedule.
       - CRON=0 3 * * *
       - TZ=Europe/Madrid
+      # Retention: local only. The remote keeps every copy (see above).
       - KEEP_GFS=7d:4w:6m
 
   offsite:

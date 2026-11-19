@@ -7,12 +7,14 @@
 #        mkdir -p export/data export/attachments
 #        sudo chown -R 1000:1000 export
 #   2. One file per secret, readable by that user and nobody else:
-#        mkdir -p secrets && chmod 700 secrets
-#        printf '%s' '<client_id>'       > secrets/bw_clientid
-#        printf '%s' '<client_secret>'   > secrets/bw_clientsecret
-#        printf '%s' '<master password>' > secrets/bw_password
-#        printf '%s' '<export password>' > secrets/export_password
-#        chmod 400 secrets/* && sudo chown -R 1000:1000 secrets
+#        mkdir -p .secrets && chmod 700 .secrets
+#        printf '%s' '<client_id>'       > .secrets/.bwclientid
+#        printf '%s' '<client_secret>'   > .secrets/.bwsecret
+#        printf '%s' '<master password>' > .secrets/.bwpassword
+#        printf '%s' '<export password>' > .secrets/.exportpassword
+#        chmod 400 .secrets/.* && sudo chown -R 1000:1000 .secrets
+#
+#   docker compose -f docker-compose.hardened.sample.yml up -d
 services:
   bw-export:
     container_name: bw-export
@@ -37,32 +39,35 @@ services:
     volumes:
       - ./export/data:/var/data
       - ./export/attachments:/var/attachments
-
     secrets:
-      - bw_clientid
-      - bw_clientsecret
-      - bw_password
-      - export_password
+      - bwclientid
+      - bwsecret
+      - bwpassword
+      - exportpassword
     environment:
-      # A path to a file is read as the value.
-      - BW_CLIENTID=/run/secrets/bw_clientid
-      - BW_CLIENTSECRET=/run/secrets/bw_clientsecret
-      - BW_PASSWORD=/run/secrets/bw_password
-      - EXPORT_PASSWORD=/run/secrets/export_password
+      # Credentials (required), read from the secret files.
+      - BW_CLIENTID_FILE=/run/secrets/bwclientid
+      - BW_CLIENTSECRET_FILE=/run/secrets/bwsecret
+      - BW_PASSWORD_FILE=/run/secrets/bwpassword
+      # Encryption: exports and attachments.
+      - EXPORT_PASSWORD_FILE=/run/secrets/exportpassword
       - ENCRYPT_ATTACHMENTS=true
-      - BW_URL_SERVER=https://vault.example.com
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
+      # Schedule.
       - CRON=0 3 * * *
       - TZ=Europe/Madrid
+      # Retention: daily for a week, weekly for a month, monthly for half a year.
       - KEEP_GFS=7d:4w:6m
-      # Keep the log with the exports, not in the tmpfs, which is lost on restart.
+      # Log: with the exports, not in the tmpfs, which is lost on restart.
       - FILE_LOG=/var/data/bw-export-logfile.log
 
 secrets:
-  bw_clientid:
-    file: ./secrets/bw_clientid
-  bw_clientsecret:
-    file: ./secrets/bw_clientsecret
-  bw_password:
-    file: ./secrets/bw_password
-  export_password:
-    file: ./secrets/export_password
+  bwclientid:
+    file: ./.secrets/.bwclientid
+  bwsecret:
+    file: ./.secrets/.bwsecret
+  bwpassword:
+    file: ./.secrets/.bwpassword
+  exportpassword:
+    file: ./.secrets/.exportpassword

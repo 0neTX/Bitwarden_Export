@@ -24,6 +24,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Examples](#examples)
 - [What it produces](#what-it-produces)
 - [Configuration](#configuration)
 - [Handling secrets](#handling-secrets)
@@ -71,7 +72,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 
 ### Docker Compose (recommended)
 
-Copy [`docker-compose.yml`](docker-compose.yml) from this repository, fill in the three credentials and run it:
+Copy [`docker-compose.yml`](docker-compose.yml) from this repository, fill in the three credentials and the export password, and run it:
 
 ```yaml
 services:
@@ -79,16 +80,18 @@ services:
     container_name: bw-export
     image: 0netx/bw-export:latest
     volumes:
-      - ./export:/var/data
-      - ./export:/var/attachments
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
     environment:
       - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
       - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
       - BW_PASSWORD=<BITWARDEN PASSWORD>
-      - EXPORT_PASSWORD=<password the export will be encrypted with>
-      # Optional: your own Vaultwarden/Bitwarden server
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      # Server: leave commented out for bitwarden.com.
       # - BW_URL_SERVER=https://vault.example.com
 ```
+
+The file lists every other option, commented out.
 
 ```bash
 docker compose up
@@ -114,7 +117,8 @@ services:
       - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
       - BW_PASSWORD=<BITWARDEN PASSWORD>
       - EXPORT_PASSWORD=<EXPORT PASSWORD>
-      - BW_URL_SERVER=https://vault.example.com
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
       - CRON=0 3 * * *
       - TZ=Europe/Madrid
       - KEEP_LAST_BACKUPS=5
@@ -147,6 +151,22 @@ The script can also be run directly from a terminal, which prompts for what it n
 ```bash
 bash bw_export.sh
 ```
+
+## Examples
+
+Each example is a complete compose file. They go from the simplest to the most complete; start with the first and move on when you need what the next one adds.
+
+| File | What it adds | Start with |
+|---|---|---|
+| [`docker-compose.yml`](docker-compose.yml) | One backup, then exit. Lists every option, commented out. | `docker compose up` |
+| [`docker-compose.cron.sample.yml`](docker-compose.cron.sample.yml) | Backups on a schedule, with retention. See [Scheduling](#scheduling). | `docker compose -f docker-compose.cron.sample.yml up -d` |
+| [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml) | Credentials as Docker secrets. See [Option A](#option-a-docker-secrets). | `docker compose -f docker-compose.secrets.sample.yml up` |
+| [`docker-compose.infisical.sample.yml`](docker-compose.infisical.sample.yml) | Credentials from Infisical. See [Option B](#option-b-infisical). | `docker compose -f docker-compose.infisical.sample.yml up` |
+| [`docker-compose.hardened.sample.yml`](docker-compose.hardened.sample.yml) | Schedule and secrets, without root, capabilities or a writable image. See [Hardened setup](#hardened-setup). | `docker compose -f docker-compose.hardened.sample.yml up -d` |
+| [`docker-compose.offsite.sample.yml`](docker-compose.offsite.sample.yml) | A second copy off the host with an rclone sidecar. See [Off-site copy](#off-site-copy-3-2-1). | `docker compose -f docker-compose.offsite.sample.yml up -d` |
+| [`compose.podman.yml`](compose.podman.yml) | Not standalone: an override for rootless Podman, added to any of the above. See [Rootless Podman](#rootless-podman). | `podman compose -f docker-compose.yml -f compose.podman.yml up` |
+
+All of them write the exports to `./export/data` and the attachments to `./export/attachments`, next to the compose file, and leave `BW_URL_SERVER` commented out, which means bitwarden.com.
 
 ## What it produces
 
@@ -304,7 +324,7 @@ See [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Re
    ![Service token](docs/assets/infisical2.png)
    ![Service token](docs/assets/infisical3.png)
 
-4. Set `INFISICAL_TOKEN` to that token and `INFISICAL_PATH` to its *Secrets Path*, then start the container as usual.
+4. Set `INFISICAL_TOKEN` to that token, then start the container as usual. `INFISICAL_PATH` is optional: the token's own *Secrets Path* always applies (see below).
 
    ![Compose sample](docs/assets/infisical4.png)
 
@@ -488,13 +508,16 @@ With `CRON` the container stays up around the clock, holding everything needed t
 | `read_only: true` | Nothing in the image can be modified. |
 | `tmpfs: /tmp` | The only writable place outside the volumes, in memory: the CLI's session data (so its tokens never touch the disk), the default log and, with `ENCRYPT_ATTACHMENTS`, one run's attachments before they are encrypted. Size it to fit them. |
 | `cap_drop: [ALL]`, `no-new-privileges` | No kernel capabilities, and no way to gain any. |
-| `secrets:` | `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` and `EXPORT_PASSWORD` are read from files instead of environment variables, so `docker inspect` does not show them. |
+| `secrets:` | `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` and `EXPORT_PASSWORD` are read from files through their `_FILE` variables instead of environment variables, so `docker inspect` does not show them. |
 
 What changes when the container does not start as root:
 
 - **`PUID`/`PGID` are ignored**: the `user:` setting already decides who owns the files, and the container says so if they are set.
 - **The mounted folders must be writable by that user**, e.g. `sudo chown -R 1000:1000 export`. A folder it cannot write to stops the run before anything is exported, naming the folder and the uid.
 - When the image's own folder cannot be written to (`read_only`, or any user other than the image's), the CLI's data and the default log move to `/tmp`. Set `FILE_LOG` inside a volume to keep the log across restarts.
+
+> [!NOTE]
+> **Rootless Podman** cannot start this file as is: with `read_only: true` it has nowhere to create the mount points for the Docker secrets under `/run/secrets`, and stops with `crun: open …/run/secrets/<name>: No such file or directory`. Under Podman set `read_only: false`; every other setting in the file works.
 
 `read_only` and `cap_drop: [ALL]` need `user:` as well. Started as root, the container sets its user up with `usermod` and `chown` and then switches to it with `su`, which a read-only filesystem and a capability-less container both prevent.
 
