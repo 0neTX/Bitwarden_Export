@@ -2,19 +2,19 @@
 
 Two layers:
 
-- **`run_tests.sh`** — 263 assertions against `bw_export.sh` using a stateful mock
+- **`run_tests.sh`** — assertions against `bw_export.sh` using a stateful mock
   of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers.
-- **`run_ping_tests.sh`** — 44 assertions against the `PING_URL` helpers in
+- **`run_ping_tests.sh`** — assertions against the `PING_URL` helpers in
   `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
   three-line stub for `curl`.
-- **`run_notify_tests.sh`** — 24 assertions against the `NOTIFICATION_URL` helper
+- **`run_notify_tests.sh`** — assertions against the `NOTIFICATION_URL` helper
   in `root/usr/local/lib/bw-export/notify.sh`, with a stub for `shoutrrr`.
-- **`run_cron_tests.sh`** — 82 assertions against `entrypoint.sh`: `CRON`
+- **`run_cron_tests.sh`** — assertions against `entrypoint.sh`: `CRON`
   scheduling and the one-shot mode, plus the non-root start.
-- **`run_secrets_tests.sh`** — 43 assertions against `resolve_secret()` in
+- **`run_secrets_tests.sh`** — assertions against `resolve_secret()` in
   `root/usr/local/lib/bw-export/secrets.sh`: values, `/run/secrets` paths and
   the `_FILE` variables.
-- **`run_retention_tests.sh`** — 40 assertions against
+- **`run_retention_tests.sh`** — assertions against
   `root/usr/local/lib/bw-export/retention.sh`, which decides the old backups
   `KEEP_LAST_BACKUPS` and `KEEP_GFS` delete. Driven with folder names only;
   nothing is created or deleted.
@@ -28,7 +28,7 @@ Two layers:
 SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
 ```
 
-Expect `PASS=263 FAIL=0`. The suite is only worth anything if it fails on the
+Expect `FAIL=0`. The suite is only worth anything if it fails on the
 code it was written against, so as a control:
 
 ```bash
@@ -81,7 +81,7 @@ rootless Podman. Against a script without the function it fails once.
 bash tests/run_ping_tests.sh
 ```
 
-Expect `PASS=33 FAIL=0`. It covers the URL building (both placeholders, the
+Expect `FAIL=0`. It covers the URL building (both placeholders, the
 appended path segment when there is none, the trailing slash, and the start ping
 that `{status}` omits) and `send_ping`'s two guarantees: it logs the event
 without the URL, because that carries the monitor's token, even when the shell
@@ -111,7 +111,7 @@ LIB=/tmp/naive.sh bash tests/run_ping_tests.sh   # PASS=3 FAIL=30
 bash tests/run_notify_tests.sh
 ```
 
-Expect `PASS=13 FAIL=0`. The notification URL carries the service's
+Expect `FAIL=0`. The notification URL carries the service's
 credentials (a Telegram bot token, a Gotify app token), so the suite checks that
 it reaches `shoutrrr` through `SHOUTRRR_URL` and never through its argv, which
 any user on the host can read with `ps`; that it stays out of the log, also
