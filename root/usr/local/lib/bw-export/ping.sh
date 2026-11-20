@@ -7,6 +7,10 @@
 # interesting half is a pure function. See tests/run_ping_tests.sh.
 # shellcheck shell=bash
 
+# Log lines in the image's one format (log.sh), loaded unless the caller did.
+# shellcheck disable=SC1090
+declare -F log_warn >/dev/null || . "${LOG_LIB:-/usr/local/lib/bw-export/log.sh}"
+
 if ! declare -F resolve_secret >/dev/null 2>&1; then
     # shellcheck disable=SC1091
     . "$(dirname "${BASH_SOURCE[0]}")/secrets.sh"
@@ -80,7 +84,7 @@ send_ping() {
     url="$(build_ping_url "$raw_url" "$1" "${2:-0}")"
     [[ -z "$url" ]] && return 0
 
-    echo -e "\n${Cyan:-}Monitoring ping: $1 "
+    log_info "Monitoring ping: $1"
 
     # No -S, and the warning below names no URL: curl reports some failures with
     # the address attached, which would put the token in the log.
@@ -97,7 +101,7 @@ send_ping() {
     # good backup into a bad exit code.
     if ! curl -fs -o /dev/null \
             --max-time 5 --retry 2 --retry-max-time 10 "$url"; then
-        echo -e "${Yellow:-}Warning: monitoring ping ($1) failed; continuing."
+        log_warn "Monitoring ping ($1) failed; continuing."
     fi
     return 0
 }

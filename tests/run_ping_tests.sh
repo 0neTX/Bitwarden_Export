@@ -14,6 +14,7 @@
 # input of its own in ci.yml.
 # shellcheck disable=SC1091,SC2030,SC2031
 SP="$(cd "$(dirname "$0")" && pwd)"
+export LOG_LIB="$SP/../root/usr/local/lib/bw-export/log.sh"
 LIB="${LIB:-$SP/../root/usr/local/lib/bw-export/ping.sh}"
 SBX="$SP/sbx/ping"
 pass=0; fail=0
@@ -96,7 +97,7 @@ rc=$( export PATH="$SBX/bin:$PATH" PING_URL="$HC" CURL_EXIT=22
       send_ping failure 3 > "$SBX/out" 2>&1; echo $? )
 eq "send_ping still returns 0" "0" "$rc"
 eq "warned without the URL" "0" \
-   "$(grep -q "monitoring ping (failure) failed" "$SBX/out" && ! grep -q "0d1e2f" "$SBX/out"; echo $?)"
+   "$(grep -q "Monitoring ping (failure) failed" "$SBX/out" && ! grep -q "0d1e2f" "$SBX/out"; echo $?)"
 
 # The guard for #22: entrypoint.sh pings from an EXIT trap, and send_notification
 # leaves "set -e" on in that shell. If the curl failure were ever allowed to

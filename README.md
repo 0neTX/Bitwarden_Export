@@ -621,6 +621,28 @@ What changes when the container does not start as root:
 
 ## Troubleshooting
 
+### Reading the log
+
+Each line is `<date> <time> LEVEL: message`, where the level is `INFO`, `WARNING`, `ERROR`, or `HINT` (what to do about the line above). The first lines of every run say what it is about to do, which is what a support request needs before anything else:
+
+```text
+2026-11-20 17:54:10 INFO: bw-export 1.12, Bitwarden CLI 2026.11.0
+2026-11-20 17:54:10 INFO: Mode: one backup, then exit, timezone UTC
+2026-11-20 17:54:10 INFO: Runs as uid 1000, gid 1000
+2026-11-20 17:54:10 INFO: Vaults: one; notifications: on; monitoring ping: off; Infisical: off; log file: on
+2026-11-20 17:54:10 INFO: Server: self-hosted, Vaultwarden 1.37.4
+2026-11-20 17:54:10 INFO: Credentials: BW_CLIENTID set, BW_CLIENTSECRET set, BW_PASSWORD from a file
+2026-11-20 17:54:10 INFO: Vault export: encrypted with EXPORT_PASSWORD (from a Docker secret)
+...
+```
+
+Messages from the Bitwarden CLI itself appear indented under the error they explain, prefixed with `bw:`.
+
+**The log is safe to share.** It never contains a password, API key, token or notification URL, a self-hosted server's address (only its kind and Vaultwarden version), or anything from inside your vault: no item, folder, organization or attachment names. Organizations and failed attachments are named by their IDs. When asking for help, paste the whole log of a failing run, from the `bw-export` line to `Run finished with exit code`.
+
+### Common problems
+
+
 | Symptom | Cause and fix |
 |---|---|
 | `Failed to unlock vault with BW_PASSWORD`, but the password is right | Vaultwarden older than 1.37.4. Upgrade the server; see [Requirements](#requirements). |
@@ -632,6 +654,7 @@ What changes when the container does not start as root:
 | Exported files belong to `root`, or to nobody you recognise | Set `PUID`/`PGID`; under rootless Podman add `compose.podman.yml`. See [PUID and PGID](#file-ownership-puid-and-pgid). |
 | The log disappears with the container | Point `FILE_LOG` inside a mounted volume. |
 | No notification arrives | A failed notification is logged without the address and does not change the exit code. Check the log and the Shoutrrr URL. |
+| `Saved …` lines with item and file names are gone | From the release after 1.12, the log names no attachment: it says how many were saved, and names a failed one by its position and item ID. |
 
 ## Upgrade notes
 

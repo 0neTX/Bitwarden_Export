@@ -9,6 +9,7 @@
 # so SC2016 ("expressions don't expand in single quotes") is the point of them.
 # shellcheck disable=SC2319,SC2030,SC2031,SC2016
 SP="$(cd "$(dirname "$0")" && pwd)"
+export LOG_LIB="$SP/../root/usr/local/lib/bw-export/log.sh"
 SCRIPT="${SCRIPT:?}"
 # The script sources it from where the image installs it; here, the repository.
 export SECRETS_LIB="$SP/../root/usr/local/lib/bw-export/secrets.sh"
@@ -54,6 +55,9 @@ check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
 check "export written" "$(exported; echo $?)" "no export file"
 check "session closed at end" "$(state_is_clean; echo $?)" "$(cat "$BW_STATE")"
 check "logged out exactly once" "$([ "$(grep -c '^bw logout' "$SP/sbx/calls")" = 1 ]; echo $?)" "count=$(grep -c '^bw logout' "$SP/sbx/calls")"
+check "logs what it will do, without values" "$(grep -q 'INFO: Server: self-hosted, version unknown' "$SP/sbx/output" && grep -q 'INFO: Credentials: BW_CLIENTID set, BW_CLIENTSECRET set, BW_PASSWORD set' "$SP/sbx/output" && grep -q 'INFO: Vault export: encrypted with EXPORT_PASSWORD (set)' "$SP/sbx/output"; echo $?)" "$(grep -E 'Server:|Credentials:|Vault export:' "$SP/sbx/output")"
+check "no secret value and no colour code in the log" "$(! grep -qE 'correct-pw|secret$|=exp|vw\.example\.com' "$SP/sbx/output" && ! grep -q $'\e' "$SP/sbx/output"; echo $?)" "$(grep -nE 'correct-pw|vw\.example\.com' "$SP/sbx/output"; grep -c $'\e' "$SP/sbx/output")"
+check "every log line has the one format" "$(! grep -vE '^$|^(Saved|----- Summary|-------------------|Duration|Personal vault|Organizations|Attachments|Trash|Backup size|Old backups deleted)|^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8} (INFO|WARNING|ERROR|HINT): ' "$SP/sbx/output" | grep -q .; echo $?)" "$(grep -vE '^$|^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8} (INFO|WARNING|ERROR|HINT): ' "$SP/sbx/output" | head -5)"
 
 echo "=== T2: issue #21 -- stale LOCKED session with stale cached password ==="
 setup 'auth=1
@@ -94,7 +98,8 @@ setup ""
 export BW_REAL_PW=correct-pw BW_FAIL_CONFIG=1
 rc=$(run)
 check "exit 1 (no longer silently ignored)" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
-check "reports server error" "$(grep -q 'Failed to set the server url' "$SP/sbx/output"; echo $?)" "no message"
+check "reports server error" "$(grep -q 'Failed to set the server URL' "$SP/sbx/output"; echo $?)" "no message"
+check "never logs the server address" "$(! grep -q 'vw.example.com' "$SP/sbx/output"; echo $?)" "$(grep 'vw.example.com' "$SP/sbx/output")"
 check "no export attempted" "$(! exported; echo $?)" "exported despite config failure"
 unset BW_FAIL_CONFIG
 
@@ -206,7 +211,7 @@ printf '%s' '[{"id":"i1","name":"Plain","attachments":[]},{"id":"i2","name":"Doc
 export BW_ITEMS_FILE="$SP/sbx/items.json"
 rc=$(run)
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
-check "announces saving" "$(grep -q 'Saving attachments' "$SP/sbx/output"; echo $?)" "no message"
+check "announces saving, with counts" "$(grep -qE 'Saving [0-9]+ attachment\(s\) from [0-9]+ item\(s\)' "$SP/sbx/output"; echo $?)" "$(grep -i attach "$SP/sbx/output")"
 check "downloaded exactly one" "$([ "$(grep -c '^ATTACHMENT' "$SP/sbx/attach")" = 1 ]; echo $?)" "$(cat "$SP/sbx/attach")"
 check "correct itemid and file" "$(grep -qP '^ATTACHMENT\ti2\tcv\.pdf\t' "$SP/sbx/attach"; echo $?)" "$(cat "$SP/sbx/attach")"
 check "file written under the item name" "$(compgen -G "$SP/sbx/att/*/Doc/cv.pdf" >/dev/null; echo $?)" "$(find "$SP/sbx/att" -type f)"
@@ -270,7 +275,7 @@ rc=$(run)
 check "exit 1 (incomplete backup)" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
 check "counts the failure" "$(grep -q '1 attachment(s) could not be saved' "$SP/sbx/output"; echo $?)" "$(tail -4 "$SP/sbx/output")"
 check "says the backup is incomplete" "$(grep -q 'This backup is incomplete' "$SP/sbx/output"; echo $?)" "no final warning"
-check "no 'Have a good day'" "$(! grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "reported success anyway"
+check "no 'Export finished successfully'" "$(! grep -q 'Export finished successfully' "$SP/sbx/output"; echo $?)" "reported success anyway"
 check "the good one was still saved" "$(compgen -G "$SP/sbx/att/*/Ok/good.txt" >/dev/null; echo $?)" "$(find "$SP/sbx/att" -type f)"
 check "session still closed" "$(state_is_clean; echo $?)" "$(cat "$BW_STATE")"
 
@@ -296,7 +301,7 @@ printf '%s' '[{"id":"i1","name":"A","attachments":[{"fileName":"a.txt"}]},
 export BW_ITEMS_FILE="$SP/sbx/items.json"
 rc=$(run)
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
-check "reports success" "$(grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "no success message"
+check "reports success" "$(grep -q 'Export finished successfully' "$SP/sbx/output"; echo $?)" "no success message"
 check "no spurious failure count" "$(! grep -q 'could not be saved' "$SP/sbx/output"; echo $?)" "claimed a failure"
 unset BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH
 
@@ -309,10 +314,10 @@ printf '%s' '[{"id":"i1","name":"Broken","attachments":[{"fileName":"bad.txt"}]}
 export BW_ITEMS_FILE="$SP/sbx/items.json" BW_FAIL_ATTACH=bad.txt KEEP_LAST_BACKUPS=1
 rc=$(run)
 check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
-check "says it is keeping them" "$(grep -q 'keeping all previous backups' "$SP/sbx/output"; echo $?)" "$(tail -5 "$SP/sbx/output")"
+check "says it is keeping them" "$(grep -q 'so no old backup is deleted for it' "$SP/sbx/output"; echo $?)" "$(tail -5 "$SP/sbx/output")"
 check "old vault backups untouched" "$([ -d "$SP/sbx/out/20200101000000-bw-export" ] && [ -d "$SP/sbx/out/20200102000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
 check "old attachment backups untouched" "$([ -d "$SP/sbx/att/20200101000000-bw-export" ] && [ -d "$SP/sbx/att/20200102000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/att")"
-check "did not run the cleanup" "$(! grep -q 'Starting cleaning previous backups' "$SP/sbx/output"; echo $?)" "pruned anyway"
+check "did not run the cleanup" "$(! grep -q 'Rotating old backups' "$SP/sbx/output"; echo $?)" "pruned anyway"
 
 echo "=== T24: a complete export still rotates as configured ==="
 setup ""
@@ -322,7 +327,7 @@ printf '%s' '[{"id":"i1","name":"Ok","attachments":[{"fileName":"good.txt"}]}]' 
 export BW_ITEMS_FILE="$SP/sbx/items.json" KEEP_LAST_BACKUPS=1
 rc=$(run)
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
-check "ran the cleanup" "$(grep -q 'Starting cleaning previous backups' "$SP/sbx/output"; echo $?)" "skipped it"
+check "ran the cleanup" "$(grep -q 'Rotating old backups' "$SP/sbx/output"; echo $?)" "skipped it"
 check "oldest was deleted" "$([ ! -d "$SP/sbx/out/20200101000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
 check "only KEEP_LAST_BACKUPS remain" "$([ "$(find "$SP/sbx/out" -maxdepth 1 -name '*-bw-export' -type d | wc -l)" = 1 ]; echo $?)" "$(ls "$SP/sbx/out")"
 unset BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS
@@ -336,7 +341,7 @@ check "names the failed export" "$(grep -q 'ERROR: Failed to export the personal
 check "counts it" "$(grep -q 'but 1 vault export(s) failed' "$SP/sbx/output"; echo $?)" "$(tail -4 "$SP/sbx/output")"
 check "says the backup is incomplete" "$(grep -q 'This backup is incomplete' "$SP/sbx/output"; echo $?)" "no final warning"
 check "no 'Vault export complete'" "$(! grep -q 'Vault export complete' "$SP/sbx/output"; echo $?)" "claimed completion"
-check "no 'Have a good day'" "$(! grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "reported success anyway"
+check "no 'Export finished successfully'" "$(! grep -q 'Export finished successfully' "$SP/sbx/output"; echo $?)" "reported success anyway"
 check "the organization was still exported" "$(compgen -G "$SP/sbx/out/*/export-o1.json" >/dev/null; echo $?)" "$(find "$SP/sbx/out" -type f)"
 check "session still closed" "$(state_is_clean; echo $?)" "$(cat "$BW_STATE")"
 
@@ -356,16 +361,16 @@ export BW_REAL_PW=correct-pw BW_FAIL_EXPORT=personal KEEP_LAST_BACKUPS=1
 mkdir -p "$SP/sbx/out/20200101000000-bw-export" "$SP/sbx/out/20200102000000-bw-export"
 rc=$(run)
 check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
-check "says it is keeping them" "$(grep -q 'keeping all previous backups' "$SP/sbx/output"; echo $?)" "$(tail -5 "$SP/sbx/output")"
+check "says it is keeping them" "$(grep -q 'so no old backup is deleted for it' "$SP/sbx/output"; echo $?)" "$(tail -5 "$SP/sbx/output")"
 check "old backups untouched" "$([ -d "$SP/sbx/out/20200101000000-bw-export" ] && [ -d "$SP/sbx/out/20200102000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
-check "did not run the cleanup" "$(! grep -q 'Starting cleaning previous backups' "$SP/sbx/output"; echo $?)" "pruned anyway"
+check "did not run the cleanup" "$(! grep -q 'Rotating old backups' "$SP/sbx/output"; echo $?)" "pruned anyway"
 
 echo "=== T28: exports with organizations all succeeding must still exit 0 ==="
 setup ""
 export BW_REAL_PW=correct-pw BW_ORGANIZATIONS_LIST=o1,o2
 rc=$(run)
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
-check "reports completion" "$(grep -q 'Vault export complete' "$SP/sbx/output" && grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "$(tail -4 "$SP/sbx/output")"
+check "reports completion" "$(grep -q 'Vault export complete' "$SP/sbx/output" && grep -q 'Export finished successfully' "$SP/sbx/output"; echo $?)" "$(tail -4 "$SP/sbx/output")"
 check "no spurious failure" "$(! grep -q 'export(s) failed\|Failed to export' "$SP/sbx/output"; echo $?)" "$(grep -i fail "$SP/sbx/output")"
 check "all three files written" "$([ "$(find "$SP/sbx/out" -name 'export-*.json' | wc -l)" = 3 ]; echo $?)" "$(find "$SP/sbx/out" -type f)"
 unset BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST KEEP_LAST_BACKUPS
@@ -386,7 +391,7 @@ rc=$(run)
 check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
 check "says it could not list" "$(grep -q 'Could not list the organizations' "$SP/sbx/output"; echo $?)" "$(grep -i 'organi' "$SP/sbx/output")"
 check "no 'No organizational vault exists'" "$(! grep -q 'No organizational vault exists' "$SP/sbx/output"; echo $?)" "claimed there are none"
-check "no 'Have a good day'" "$(! grep -q 'Have a good day' "$SP/sbx/output"; echo $?)" "reported success anyway"
+check "no 'Export finished successfully'" "$(! grep -q 'Export finished successfully' "$SP/sbx/output"; echo $?)" "reported success anyway"
 unset BW_FAIL_LIST
 echo "=== T31: neither password reaches a command line (ps shows those to every user) ==="
 setup ""
@@ -444,7 +449,8 @@ export BW_ITEMS_FILE="$SP/sbx/items.json"
 rc=$(run)
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(grep -i 'error\|organi' "$SP/sbx/output")"
 check "not attempted" "$(! grep -q '^bw export --organizationid' "$BW_CALLLOG"; echo $?)" "$(grep '^bw export' "$BW_CALLLOG")"
-check "says why, by name" "$(grep -q 'Skipping organization "Familia" (o-fam): your role (User) cannot export it' "$SP/sbx/output"; echo $?)" "$(grep -i 'organi' "$SP/sbx/output")"
+check "says why, by ID" "$(grep -q 'Skipping organization o-fam: your role (User) cannot export it' "$SP/sbx/output"; echo $?)" "$(grep -i 'organi' "$SP/sbx/output")"
+check "never logs its name" "$(! grep -q 'Familia' "$SP/sbx/output"; echo $?)" "$(grep 'Familia' "$SP/sbx/output")"
 check "not 'No organizational vault exists'" "$(! grep -q 'No organizational vault exists' "$SP/sbx/output"; echo $?)" "claimed there are none"
 check "attachments saved" "$(compgen -G "$SP/sbx/att/*/Doc/a.pdf" >/dev/null; echo $?)" "$(find "$SP/sbx/att" -type f)"
 check "personal vault saved" "$(exported; echo $?)" "no export file"
@@ -463,11 +469,11 @@ rc=$(run)
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
 check "Owner and Admin exported" "$([ "$(grep -c '^bw export --organizationid' "$BW_CALLLOG")" = 2 ] && grep -q '^bw export --organizationid o0 ' "$BW_CALLLOG" && grep -q '^bw export --organizationid o1 ' "$BW_CALLLOG"; echo $?)" "$(grep '^bw export --org' "$BW_CALLLOG")"
 check "five skipped" "$([ "$(grep -c 'Skipping organization' "$SP/sbx/output")" = 5 ]; echo $?)" "$(grep 'Skipping' "$SP/sbx/output")"
-check "Manager named" "$(grep -q '(o3): your role (Manager) cannot export it' "$SP/sbx/output"; echo $?)" "$(grep 'o3' "$SP/sbx/output")"
-check "Custom named, with the way out" "$(grep -q '(o4): the CLI cannot tell whether your role (Custom) may export it' "$SP/sbx/output" && grep -A1 '(o4)' "$SP/sbx/output" | grep -q 'add its ID to BW_ORGANIZATIONS_LIST'; echo $?)" "$(grep -A1 'o4' "$SP/sbx/output")"
-check "unconfirmed named" "$(grep -q '(o5): your membership is not confirmed' "$SP/sbx/output"; echo $?)" "$(grep 'o5' "$SP/sbx/output")"
-check "revoked named" "$(grep -q '(o6): your access to it is revoked' "$SP/sbx/output"; echo $?)" "$(grep 'o6' "$SP/sbx/output")"
-check "a name cannot write escapes into the log" "$(grep -qF '"Rev_[31m\n" (o6)' "$SP/sbx/output" && ! grep -q $'\e\\[31m' "$SP/sbx/output"; echo $?)" "$(grep 'o6' "$SP/sbx/output" | od -c | head -3)"
+check "Manager by ID" "$(grep -q 'organization o3: your role (Manager) cannot export it' "$SP/sbx/output"; echo $?)" "$(grep 'o3' "$SP/sbx/output")"
+check "Custom by ID, with the way out" "$(grep -q 'organization o4: the CLI cannot tell whether your role (Custom) may export it' "$SP/sbx/output" && grep -A1 'organization o4:' "$SP/sbx/output" | grep -q 'add its ID to BW_ORGANIZATIONS_LIST'; echo $?)" "$(grep -A1 'o4' "$SP/sbx/output")"
+check "unconfirmed by ID" "$(grep -q 'organization o5: your membership is not confirmed' "$SP/sbx/output"; echo $?)" "$(grep 'o5' "$SP/sbx/output")"
+check "revoked by ID" "$(grep -q 'organization o6: your access to it is revoked' "$SP/sbx/output"; echo $?)" "$(grep 'o6' "$SP/sbx/output")"
+check "no organization name in the log, so no escape from one" "$(! grep -q 'Rev' "$SP/sbx/output" && ! grep -q $'\e' "$SP/sbx/output"; echo $?)" "$(grep 'o6' "$SP/sbx/output" | od -c | head -3)"
 
 echo "=== T37: an organization named in BW_ORGANIZATIONS_LIST is tried, and a refusal explained ==="
 setup ""
@@ -479,7 +485,7 @@ mkdir -p "$SP/sbx/out/20200101000000-bw-export" "$SP/sbx/out/20200102000000-bw-e
 rc=$(run)
 check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
 check "attempted" "$(grep -q '^bw export --organizationid o-fam ' "$BW_CALLLOG"; echo $?)" "$(grep '^bw export' "$BW_CALLLOG")"
-check "hint names the role" "$(grep -q 'Hint: your role (User) cannot export it' "$SP/sbx/output" && grep -q 'Remove it from BW_ORGANIZATIONS_LIST' "$SP/sbx/output"; echo $?)" "$(grep -A2 'Failed to export' "$SP/sbx/output")"
+check "hint names the role" "$(grep -q 'HINT: your role (User) cannot export it' "$SP/sbx/output" && grep -q 'Remove it from BW_ORGANIZATIONS_LIST' "$SP/sbx/output"; echo $?)" "$(grep -A2 'Failed to export' "$SP/sbx/output")"
 # The refusal logs the CLI out. Run before it, the attachments survive it.
 check "attachments saved before the refusal" "$(compgen -G "$SP/sbx/att/*/Doc/a.pdf" >/dev/null; echo $?)" "$(grep -i 'attach\|not logged' "$SP/sbx/output")"
 check "no listing failure" "$(grep -q '1 vault export(s) and 0 vault listing(s) failed' "$SP/sbx/output"; echo $?)" "$(grep 'failed' "$SP/sbx/output")"
@@ -522,19 +528,23 @@ for value in none " NoNe "; do
   check "[$value] personal vault saved" "$(exported; echo $?)" "no export file"
 done
 
-echo "=== T40: each saved attachment gets a line of its own ==="
+echo "=== T40: the log names no item and no attachment, only counts and item IDs ==="
 setup ""
-# The CLI prints "Saved <path>" with no newline; passed through as is, every
-# attachment ran into one line, and log viewers cut that line short.
+# Item and file names are vault data (a person's name, an ID number), and a log
+# is what gets pasted into a support request. The CLI's "Saved <path>" carries
+# both, so it is not logged.
 export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
-printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"},{"fileName":"b.txt"}]},{"id":"i2","name":"Key","attachments":[{"fileName":"c.key"}]}]' \
+printf '%s' '[{"id":"i1","name":"Jane Doe Passport","attachments":[{"fileName":"passport-12345678Z.pdf"},{"fileName":"b.txt"}]},{"id":"i2","name":"Key","attachments":[{"fileName":"c.key"}]}]' \
   > "$SP/sbx/items.json"
 export BW_ITEMS_FILE="$SP/sbx/items.json"
 rc=$(run)
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
-check "three Saved lines" "$([ "$(grep -c '^Saved .*/att/.*/\(Doc/a\.pdf\|Doc/b\.txt\|Key/c\.key\)$' "$SP/sbx/output")" = 3 ]; echo $?)" "$(grep 'Saved' "$SP/sbx/output")"
-check "never two on one line" "$(! grep -q 'Saved .*Saved' "$SP/sbx/output"; echo $?)" "$(grep 'Saved.*Saved' "$SP/sbx/output")"
-check "a failed one is still counted" "$(export BW_FAIL_ATTACH=b.txt; rc=$(run); [ "$rc" = 1 ] && grep -q '1 attachment(s) could not be saved' "$SP/sbx/output"; echo $?)" "$(grep -i 'attach' "$SP/sbx/output")"
+check "all three saved" "$([ "$(find "$SP/sbx/att" -type f | wc -l)" = 3 ]; echo $?)" "$(find "$SP/sbx/att" -type f)"
+check "no item or file name in the log" "$(! grep -qE 'Jane|Passport|12345678Z|b\.txt|c\.key' "$SP/sbx/output"; echo $?)" "$(grep -E 'Jane|Passport|12345678Z|b\.txt|c\.key' "$SP/sbx/output")"
+check "counts instead" "$(grep -q 'Saving 3 attachment(s) from 2 item(s)' "$SP/sbx/output" && grep -q 'Attachments: 3 saved, 0 failed\.$' "$SP/sbx/output"; echo $?)" "$(grep -i attach "$SP/sbx/output")"
+rc=$(export BW_FAIL_ATTACH=b.txt; run)
+check "a failed one is counted" "$([ "$rc" = 1 ] && grep -q '1 attachment(s) could not be saved' "$SP/sbx/output"; echo $?)" "$(grep -i 'attach' "$SP/sbx/output")"
+check "and named by position and item ID only" "$(grep -q 'Attachment 2 of 3 (item i1) could not be saved' "$SP/sbx/output" && ! grep -q 'b\.txt' "$SP/sbx/output"; echo $?)" "$(grep -i 'attachment 2' "$SP/sbx/output")"
 
 echo "=== T41: an EXPORT_PASSWORD that yields no password never exports unencrypted ==="
 # A folder is what Docker makes of a bind-mounted secret file that does not
@@ -736,7 +746,7 @@ rc=$(run)
 check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
 check "the export was written" "$(exported; echo $?)" "$(ls "$SP/sbx/out")"
 check "nothing deleted" "$([ -d "$SP/sbx/out/20200101000000-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
-check "says why" "$(grep -q 'KEEP_GFS:7days is not valid' "$SP/sbx/output" && grep -q 'old backups were not rotated' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
+check "says why" "$(grep -q 'KEEP_GFS=7days is not valid' "$SP/sbx/output" && grep -q 'old backups were not rotated' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
 unset KEEP_GFS KEEP_LAST_BACKUPS
 
 echo "=== T54: KEEP_LAST_BACKUPS keeps its meaning, and a folder name with spaces is safe ==="
@@ -746,7 +756,7 @@ mkdir -p "$SP/sbx/out/20200101000000-bw-export" "$SP/sbx/out/20200102000000-bw-e
 rc=$(run)
 check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
 check "only the oldest went" "$([ ! -d "$SP/sbx/out/20200101000000-bw-export" ] && [ -d "$SP/sbx/out/20200102000000-bw-export" ] && [ -d "$SP/sbx/out/a b-bw-export" ]; echo $?)" "$(ls "$SP/sbx/out")"
-check "rejects a non-number as before" "$(export KEEP_LAST_BACKUPS=x; rc=$(run); [ "$rc" = 1 ] && grep -q 'KEEP_LAST_BACKUPS:x is not a number' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
+check "rejects a non-number as before" "$(export KEEP_LAST_BACKUPS=x; rc=$(run); [ "$rc" = 1 ] && grep -q 'KEEP_LAST_BACKUPS=x is not a number' "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
 unset KEEP_LAST_BACKUPS
 
 echo "=== T55: the summary says what the run did ==="
@@ -829,7 +839,7 @@ check "item folders are 700" "$([ "$(stat -c %a "$SP"/sbx/att/*-bw-export/Doc "$
 check "the export and the attachments are 600" "$([ "$(stat -c %a "$SP"/sbx/out/*-bw-export/*.json "$SP"/sbx/att/*-bw-export/Doc/a.pdf "$SP"/sbx/att/*-bw-export/.ssh/id_ed25519 | sort -u)" = 600 ]; echo $?)" "$(run_modes "$SP/sbx")"
 check "nothing in a run folder is open to others" "$([ -z "$(open_to_others)" ]; echo $?)" "$(open_to_others)"
 check "the folders it was given are left as they were" "$([ "$(stat -c %a "$SP/sbx/out" "$SP/sbx/att")" = "$given_modes" ]; echo $?)" "before: $given_modes; now: $(stat -c %a "$SP/sbx/out" "$SP/sbx/att")"
-check "says so" "$(grep -q 'BACKUP_PERMISSIONS=private' "$SP/sbx/output"; echo $?)" "$(head -20 "$SP/sbx/output")"
+check "says so" "$(grep -q 'permissions private (BACKUP_PERMISSIONS)' "$SP/sbx/output"; echo $?)" "$(grep 'Folders' "$SP/sbx/output")"
 rc=$(export BACKUP_PERMISSIONS=PRIVATE; umask 022; run)
 check "the value is case-insensitive" "$([ "$rc" = 0 ] && [ "$(stat -c %a "$SP"/sbx/out/*-bw-export | sort -u | tail -n 1)" = 700 ]; echo $?)" "rc=$rc $(run_modes "$SP/sbx/out")"
 # The attachments archive is written by gpg, under its own file creation rules.

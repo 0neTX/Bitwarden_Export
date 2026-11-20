@@ -28,7 +28,8 @@ jobs:
             root/usr/local/lib/bw-export/secrets.sh \
             root/usr/local/lib/bw-export/retention.sh \
             root/usr/local/lib/bw-export/vaults.sh tests/run_vaults_tests.sh \
-            tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
+            tests/mock/bw tests/mock/curl root/usr/local/lib/bw-export/log.sh \
+            root/etc/cont-init.d/10-adduser tests/run_tests.sh tests/run_ping_tests.sh \
             tests/run_notify_tests.sh tests/run_cron_tests.sh \
             tests/run_secrets_tests.sh tests/run_retention_tests.sh \
             tests/e2e-setup.sh tests/e2e-verify.sh

@@ -7,6 +7,7 @@
 # Assertions read as `check "name" "$([ cond ]; echo $?)" "detail"`; see run_tests.sh.
 # shellcheck disable=SC2319
 SP="$(cd "$(dirname "$0")" && pwd)"
+export LOG_LIB="$SP/../root/usr/local/lib/bw-export/log.sh"
 SCRIPT="${SCRIPT:?}"
 export SECRETS_LIB="$SP/../root/usr/local/lib/bw-export/secrets.sh"
 export RETENTION_LIB="$SP/../root/usr/local/lib/bw-export/retention.sh"
@@ -24,7 +25,7 @@ setup() {
 # top of the paths every test shares. Nothing else from this shell reaches it.
 run() {
   env -i PATH="$SBX/wrap:$SP/mock:/usr/local/bin:/usr/bin:/bin" HOME="$SBX" \
-      SECRETS_LIB="$SECRETS_LIB" RETENTION_LIB="$RETENTION_LIB" VAULTS_LIB="$VAULTS_LIB" \
+      SECRETS_LIB="$SECRETS_LIB" RETENTION_LIB="$RETENTION_LIB" VAULTS_LIB="$VAULTS_LIB" LOG_LIB="$LOG_LIB" \
       BW_STATE="$BW_STATE" BW_CALLLOG="$BW_CALLLOG" BW_REAL_PW="$BW_REAL_PW" \
       BW_EXPORT_PWLOG="$SBX/pwlog" \
       OUTPUT_PATH="$SBX/out" ATTACHMENTS_PATH="$SBX/att" BITWARDENCLI_APPDATA_DIR="$SBX/app" \

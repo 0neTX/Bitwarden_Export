@@ -22,13 +22,15 @@
 # exported or the CLI never sees it and silently falls back to its own default.
 export BITWARDENCLI_APPDATA_DIR="${BITWARDENCLI_APPDATA_DIR:-"$(pwd)"}"
 params_validated=0
-Yellow='\033[0;33m'  # Yellow
-IYellow='\033[0;93m' # Yellow
-IGreen='\033[0;92m'  # Green
-Cyan='\033[0;36m'    # Cyan
-UCyan='\033[4;36m'   # Cyan
-UWhite='\033[4;37m'  # White
-Blue='\033[0;34m'    # Blue
+
+# log_info, log_warn, log_error, log_hint: see log.sh. Overridable like the
+# other libraries below, so the tests can point it at the repository.
+LOG_LIB="${LOG_LIB:-/usr/local/lib/bw-export/log.sh}"
+# shellcheck disable=SC1090
+if ! . "$LOG_LIB"; then
+    echo "$(date '+%F %T') ERROR: Could not load $LOG_LIB."
+    exit 1
+fi
 
 # Several vaults (BW_VAULTS): vaults.sh runs this script once per vault, with
 # BW_VAULTS removed, so each of those runs is an ordinary single-vault export.
@@ -43,7 +45,7 @@ fi
 SECRETS_LIB="${SECRETS_LIB:-/usr/local/lib/bw-export/secrets.sh}"
 # shellcheck disable=SC1090
 if ! . "$SECRETS_LIB"; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not load $SECRETS_LIB, exiting..."
+    log_error "Could not load $SECRETS_LIB, exiting..."
     exit 1
 fi
 
@@ -54,20 +56,17 @@ run_started=$SECONDS
 RETENTION_LIB="${RETENTION_LIB:-/usr/local/lib/bw-export/retention.sh}"
 # shellcheck disable=SC1090,SC1091
 if ! . "$RETENTION_LIB"; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not load $RETENTION_LIB."
+    log_error "Could not load $RETENTION_LIB."
     exit 1
 fi
 
-echo Starting ...
 #Set locations to save export files
 if [[ -z "${OUTPUT_PATH}" ]]; then
-    echo -e "\n$(date '+%F %T') ${Cyan}Info: OUTPUT_PATH enviroment not provided. Using default value: /var/data"
     save_folder="/var/data/"
 else
     save_folder="${OUTPUT_PATH}"
     if [[ ! -d "$save_folder" ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not find the folder in which to save the files: $save_folder "
-        echo
+        log_error "Could not find the folder in which to save the files: $save_folder"
         params_validated=-1
     fi
 fi
@@ -85,7 +84,6 @@ is_anonymous_volume() {
 #Set locations to save attachment files
 if [[ -z "${ATTACHMENTS_PATH}" ]]; then
     save_folder_attachments="/var/attachments/"
-    echo -e "\n$(date '+%F %T') ${Cyan}Info: ATTACHMENTS_PATH enviroment not provided. Using default value: /var/attachments"
     # The README and docker-compose.yml used to mount /var/attachment (singular),
     # which nothing here writes to: attachments went to the anonymous volume
     # behind VOLUME /var/attachments and never reached the host. Honour such a
@@ -98,14 +96,13 @@ if [[ -z "${ATTACHMENTS_PATH}" ]]; then
     if mountpoint -q /var/attachment 2>/dev/null \
             && { ! mountpoint -q /var/attachments 2>/dev/null || is_anonymous_volume /var/attachments; }; then
         save_folder_attachments="/var/attachment/"
-        echo -e "\n$(date '+%F %T') ${IYellow}Warning: /var/attachment is mounted. Saving attachments there."
-        echo -e "$(date '+%F %T') ${IYellow}Mount the host folder on /var/attachments instead; /var/attachment will stop being used in a future release."
+        log_warn "/var/attachment is mounted. Saving attachments there."
+        log_hint "Mount the host folder on /var/attachments instead; /var/attachment will stop being used in a future release."
     fi
 else
     save_folder_attachments="${ATTACHMENTS_PATH}"
     if [[ ! -d "$save_folder_attachments" ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not find the folder in which to save the attachments files: $save_folder_attachments "
-        echo
+        log_error "Could not find the folder in which to save the attachments files: $save_folder_attachments"
         params_validated=-1
     fi
 fi
@@ -115,8 +112,8 @@ fi
 # "user:"), the host folder's owner is the usual reason.
 for folder in "$save_folder" "$save_folder_attachments"; do
     if [[ -d "$folder" ]] && [[ ! -w "$folder" ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Cannot write to $folder as uid $(id -u)."
-        echo "$(date '+%F %T') Give that user write access to the host folder mounted there, e.g. chown $(id -u):$(id -g) <folder>."
+        log_error "Cannot write to $folder as uid $(id -u)."
+        log_info "Give that user write access to the host folder mounted there, e.g. chown $(id -u):$(id -g) <folder>."
         params_validated=-1
     fi
 done
@@ -124,59 +121,42 @@ done
 #Set Vaultwarden own server.
 # To obtain your organization_id value, open a terminal and type:
 #   bw login #(follow the prompts);
-if [[ -z "${BW_URL_SERVER}" ]]; then
-    echo -e -n "$Cyan" # set text = yellow
-    echo -e "\nInfo: BW_URL_SERVER enviroment not provided."
-
-    echo -n "$(date '+%F %T') If you have your own Bitwarden or Vaulwarden server, set in the environment variable BW_URL_SERVER its url address. "
-    echo -n "$(date '+%F %T') Example: https://skynet-vw.server.com"
-    echo
-else
-    bw_url_server="${BW_URL_SERVER}"
-fi
+bw_url_server="${BW_URL_SERVER:-}"
 
 #Set Bitwarden session authentication.
 # To obtain your organization_id value, open a terminal and type:
 #   bw login #(follow the prompts);
 if ! secret_is_set BW_CLIENTID; then
-
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_CLIENTID nor BW_CLIENTID_FILE is set, exiting..."
-
-    echo -n "$(date '+%F %T') Your Bitwarden Personal API Key can be obtain in:"
-    echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
+    log_error "Neither BW_CLIENTID nor BW_CLIENTID_FILE is set."
+    log_hint "It comes from your personal API key: https://bitwarden.com/help/personal-api-key/"
     params_validated=-1
 else
     client_id=$(resolve_secret BW_CLIENTID)
     if [[ -z "$client_id" ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTID is set, but no value could be read from it."
+        log_error "BW_CLIENTID is set, but no value could be read from it."
         params_validated=-1
     fi
 fi
 
 if ! secret_is_set BW_CLIENTSECRET; then
-
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_CLIENTSECRET nor BW_CLIENTSECRET_FILE is set, exiting..."
-
-    echo -n "$(date '+%F %T') Your Bitwarden Personal API Key can be obtain in:"
-    echo -n "$(date '+%F %T') https://bitwarden.com/help/personal-api-key/"
+    log_error "Neither BW_CLIENTSECRET nor BW_CLIENTSECRET_FILE is set."
+    log_hint "It comes from your personal API key: https://bitwarden.com/help/personal-api-key/"
     params_validated=-1
 else
     client_secret=$(resolve_secret BW_CLIENTSECRET)
     if [[ -z "$client_secret" ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_CLIENTSECRET is set, but no value could be read from it."
+        log_error "BW_CLIENTSECRET is set, but no value could be read from it."
         params_validated=-1
     fi
 fi
 
 if ! secret_is_set BW_PASSWORD; then
-
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: neither BW_PASSWORD nor BW_PASSWORD_FILE is set, exiting..."
-
+    log_error "Neither BW_PASSWORD nor BW_PASSWORD_FILE is set."
     params_validated=-1
 else
     bw_password=$(resolve_secret BW_PASSWORD)
     if [[ -z "$bw_password" ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BW_PASSWORD is set, but no value could be read from it."
+        log_error "BW_PASSWORD is set, but no value could be read from it."
         params_validated=-1
     fi
 fi
@@ -189,31 +169,22 @@ organizations_setting=${BW_ORGANIZATIONS_LIST//[[:space:]]/}
 if [[ ${organizations_setting,,} == none ]]; then
     organizations_none=1
     organization_list=""
-    echo -e "\n$(date '+%F %T') ${Cyan}Info: BW_ORGANIZATIONS_LIST is none. No organization will be exported."
-elif [[ -z "${BW_ORGANIZATIONS_LIST}" ]]; then
-    echo -e "\n$(date '+%F %T') ${Cyan} BW_ORGANIZATIONS_LIST enviroment not provided. Every organization you own or administer will be exported. "
+    log_info "BW_ORGANIZATIONS_LIST is none. No organization will be exported."
 fi
 
 #Check export password
 if ! secret_is_set EXPORT_PASSWORD; then
-
-    echo
-    echo -e "\n$(date '+%F %T') ${IYellow}-------------------------------------------------------------------------------------------------------------"
-    echo -e "\n$(date '+%F %T') ${IYellow}Warning: EXPORT_PASSWORD enviroment not provided. Exports require a password to securize your exported vault."
-    echo -e "\n$(date '+%F %T') ${IYellow}-------------------------------------------------------------------------------------------------------------"
-    echo
+    log_warn "EXPORT_PASSWORD is not set, so the vault is exported UNENCRYPTED."
+    log_hint "Set EXPORT_PASSWORD, and keep it somewhere other than Bitwarden itself."
     password1=""
-
 else
     password1=$(resolve_secret EXPORT_PASSWORD)
-    if [[ -n "$password1" ]]; then
-        echo -e "\n$(date '+%F %T') ${Cyan}Info:  Be sure to save your EXPORT_PASSWORD in a safe place!"
-    else
+    if [[ -z "$password1" ]]; then
         # Set means an encrypted export was asked for. Falling back to a plain
         # one wrote the whole vault to disk unencrypted and reported success,
         # for instance when Docker had made a folder of a missing secret file.
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: EXPORT_PASSWORD is set, but no password could be read from it."
-        echo -e "$(date '+%F %T') ${IYellow}The vault is not exported unencrypted in its place."
+        log_error "EXPORT_PASSWORD is set, but no password could be read from it."
+        log_hint "The vault is not exported unencrypted in its place."
         params_validated=-1
     fi
 fi
@@ -228,18 +199,17 @@ case "${ENCRYPT_ATTACHMENTS,,}" in
     "" | false | no | off | 0) ;;
     true | yes | on | 1)
         if [[ -z $password1 ]]; then
-            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: ENCRYPT_ATTACHMENTS is on, but EXPORT_PASSWORD is not set. The attachments are encrypted with it."
+            log_error "ENCRYPT_ATTACHMENTS is on, but EXPORT_PASSWORD is not set. The attachments are encrypted with it."
             params_validated=-1
         elif ! command -v gpg >/dev/null 2>&1; then
-            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: ENCRYPT_ATTACHMENTS is on, but gpg is not installed."
+            log_error "ENCRYPT_ATTACHMENTS is on, but gpg is not installed."
             params_validated=-1
         else
             attachments_encryption=1
-            echo -e "\n$(date '+%F %T') ${Cyan}Info: Attachments will be saved as one archive encrypted with EXPORT_PASSWORD."
         fi
         ;;
     *)
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: ENCRYPT_ATTACHMENTS must be true or false, not \"${ENCRYPT_ATTACHMENTS}\"."
+        log_error "ENCRYPT_ATTACHMENTS must be true or false, not \"${ENCRYPT_ATTACHMENTS}\"."
         params_validated=-1
         ;;
 esac
@@ -256,21 +226,47 @@ case "${BACKUP_PERMISSIONS,,}" in
     "" | default) ;;
     private)
         backup_private=1
-        echo -e "\n$(date '+%F %T') ${Cyan}Info: BACKUP_PERMISSIONS=private. The backup's folders are 700 and its files 600."
         ;;
     *)
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BACKUP_PERMISSIONS must be private or default, not \"${BACKUP_PERMISSIONS}\"."
+        log_error "BACKUP_PERMISSIONS must be private or default, not \"${BACKUP_PERMISSIONS}\"."
         params_validated=-1
         ;;
 esac
 
 # Check if required parameters has beed proviced.
 if [[ $params_validated != 0 ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}One or more required environment variables have not been set."
-    echo -e "${IYellow}Please check the required environment variables:"
-    echo -e "${IYellow}BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD and, if set, EXPORT_PASSWORD"
+    log_error "The configuration is not valid, so nothing was exported. See the errors above."
     exit 1
 fi
+
+# What this run is about to do, for whoever reads the log later: every setting
+# that changes the outcome, and where each credential comes from. No value of a
+# secret, and no server address (see server_label in log.sh).
+[[ -n ${BW_EXPORT_VAULT:-} ]] && log_info "Vault: $BW_EXPORT_VAULT"
+log_info "Server: $(server_label "$bw_url_server")"
+log_info "Credentials: BW_CLIENTID $(secret_source BW_CLIENTID), BW_CLIENTSECRET $(secret_source BW_CLIENTSECRET), BW_PASSWORD $(secret_source BW_PASSWORD)"
+if [[ -n $password1 ]]; then
+    log_info "Vault export: encrypted with EXPORT_PASSWORD ($(secret_source EXPORT_PASSWORD))"
+else
+    log_info "Vault export: UNENCRYPTED"
+fi
+if [[ $organizations_none -eq 1 ]]; then
+    log_info "Organizations: none (BW_ORGANIZATIONS_LIST=none)"
+elif [[ -n $organization_list ]]; then
+    log_info "Organizations: the $(tr ',' '\n' <<<"$organization_list" | grep -c .) listed in BW_ORGANIZATIONS_LIST"
+else
+    log_info "Organizations: every one you own or administer"
+fi
+if [[ $attachments_encryption -eq 1 ]]; then
+    log_info "Attachments: one archive encrypted with EXPORT_PASSWORD (ENCRYPT_ATTACHMENTS)"
+else
+    log_info "Attachments: plain files"
+fi
+log_info "Folders: exports in $save_folder, attachments in $save_folder_attachments, permissions $([[ $backup_private -eq 1 ]] && echo "private (BACKUP_PERMISSIONS)" || echo default)"
+retention_text=""
+[[ -n ${KEEP_LAST_BACKUPS} ]] && retention_text="last ${KEEP_LAST_BACKUPS} (KEEP_LAST_BACKUPS)"
+[[ -n ${KEEP_GFS} ]] && retention_text="${retention_text:+$retention_text and }${KEEP_GFS} (KEEP_GFS)"
+log_info "Retention: ${retention_text:-off, every backup is kept}"
 
 session_closed=0
 
@@ -294,7 +290,7 @@ close_session() {
         return 0
     fi
     session_closed=1
-    echo "$(date '+%F %T') Closing Bitwarden CLI session..."
+    log_info "Closing Bitwarden CLI session..."
     bw lock >/dev/null 2>&1 || true
     bw logout >/dev/null 2>&1 || true
     BW_CLIENTID=
@@ -302,8 +298,7 @@ close_session() {
     BW_SESSION=
 }
 
-echo "$(date '+%F %T') $(date '+%F %T') Starting exporting..."
-echo
+log_info "Starting the export."
 
 # bw login --apikey reads them from the environment. Exported explicitly: given
 # through BW_CLIENTID_FILE, they were never in the environment to begin with.
@@ -321,66 +316,73 @@ trap 'close_session; exit 143' TERM
 # change), and "bw unlock" validates the password against that cached copy, so a
 # stale cache fails forever until the account is logged out and logged in again.
 if [[ $(bw status | jq -r .status) != "unauthenticated" ]]; then
-    echo "$(date '+%F %T') Existing session detected. Logging out before starting..."
+    log_info "Existing session detected. Logging out before starting..."
     bw logout >/dev/null 2>&1 || true
     if [[ $(bw status | jq -r .status) != "unauthenticated" ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not log out the previous session."
-        echo "$(date '+%F %T') Remove the Bitwarden CLI data directory or recreate the container, then retry."
-        echo
+        log_error "Could not log out the previous session."
+        log_info "Remove the Bitwarden CLI data directory or recreate the container, then retry."
         exit 1
     fi
 fi
 
 if [[ $bw_url_server != "" && $bw_url_server != *"bitwarden.com" ]]; then
-    echo "$(date '+%F %T') Setting custom server..."
-    if ! bw config server "$bw_url_server" --nointeraction; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to set the server url: $bw_url_server"
-        echo
+    log_info "Setting custom server..."
+    if ! bw config server "$bw_url_server" --nointeraction >/dev/null; then
+        log_error "Failed to set the server URL (BW_URL_SERVER)."
+        log_hint "It must be the full HTTPS address of your server, e.g. https://vault.example.com."
         exit 1
     fi
-    echo
 fi
 
-echo "$(date '+%F %T') Performing login..."
-bw login --apikey --method 0 --quiet --nointeraction
+# What the CLI printed on stderr, under the error it explains, one indented
+# line each. The CLI's last message often lacks a newline, so printed as it
+# came, the next log line ran into it. Its messages describe the failure
+# (wrong password, unreachable server), never a credential.
+#   $1  file holding the CLI's stderr
+cli_said() {
+    [[ -s $1 ]] || return 0
+    { cat "$1"; echo; } | grep -v '^[[:space:]]*$' | sed 's/^/    bw: /'
+}
+
+log_info "Performing login..."
+cli_err=$(mktemp)
+bw login --apikey --method 0 --quiet --nointeraction 2>"$cli_err"
 if [[ $(bw status | jq -r .status) == "unauthenticated" ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to login."
-    echo
+    log_error "Failed to login."
+    cli_said "$cli_err"
+    rm -f "$cli_err"
+    log_hint "Check BW_CLIENTID and BW_CLIENTSECRET, and that they belong to an account on this server."
     exit 1
 fi
 
 #Unlock the vault
-echo "$(date '+%F %T') Unlocking the vault..."
+log_info "Unlocking the vault..."
 # Neither password goes on a command line: any user on the host can read a
 # container process's arguments with ps, but only its owner and root can read its
 # environment or its stdin. A dedicated variable rather than BW_PASSWORD, which
 # may hold a file path instead of the password.
-session_key=$(BW_EXPORT_UNLOCK_PASSWORD="$bw_password" bw unlock --passwordenv BW_EXPORT_UNLOCK_PASSWORD --raw)
+session_key=$(BW_EXPORT_UNLOCK_PASSWORD="$bw_password" bw unlock --passwordenv BW_EXPORT_UNLOCK_PASSWORD --raw 2>"$cli_err")
 unlock_result=$?
 #Verify that unlock succeeded
 if [[ $unlock_result -ne 0 ]] || [[ -z $session_key ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to unlock vault with BW_PASSWORD."
+    log_error "Failed to unlock vault with BW_PASSWORD."
+    cli_said "$cli_err"
+    rm -f "$cli_err"
+    log_hint "Check BW_PASSWORD. On a self-hosted Vaultwarden older than 1.37.4 this error appears even with the right password: see the Server line above."
     exit 1
 else
-    echo "$(date '+%F %T') Vault unlocked."
+    log_info "Vault unlocked."
 fi
+rm -f "$cli_err"
 #Export the session key as an env variable (needed by BW CLI)
 export BW_SESSION="$session_key"
 
 #Check if the user has decided to enter a password or save unencrypted
-if [[ $password1 == "" ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}WARNING! Your vault contents will be saved to an unencrypted file."
-    echo "$(date '+%F %T') WARNING! Your vault contents will be saved to an unencrypted file."
-else
-    echo -e "\n$(date '+%F %T') ${Cyan}Info: Password for encrypted export has been provided."
-fi
-
-echo "$(date '+%F %T') Performing vault exports..."
+log_info "Performing vault exports..."
 
 # 1. Export the personal vault
 if [[ ! -d "$save_folder" ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not find the folder in which to save the files. Path: $save_folder"
-    echo
+    log_error "Could not find the folder in which to save the files. Path: $save_folder"
     exit 1
 fi
 
@@ -431,24 +433,22 @@ run_export() {
     else
         saved=$(bw export "$@") || rc=$?
     fi
-    [[ -n "$saved" ]] && echo "$saved"
+    [[ -n "$saved" ]] && log_info "$saved"
     if [[ $rc -eq 0 ]] && [[ ! -s "$(sed -n 's/^Saved //p' <<<"$saved" | tail -n 1)" ]]; then
         rc=1
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: The CLI reported no saved file for the $what."
+        log_error "The CLI reported no saved file for the $what."
     fi
     if [[ $rc -ne 0 ]]; then
         exports_failed=$((exports_failed + 1))
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Failed to export the $what."
+        log_error "Failed to export the $what."
     fi
 }
 
 if [[ $password1 == "" ]]; then
-    echo
-    echo "$(date '+%F %T') Exporting personal vault to an unencrypted file..."
+    log_info "Exporting personal vault to an unencrypted file..."
     run_export "personal vault" --format json --output "$runtime_save_folder"
 else
-    echo
-    echo "$(date '+%F %T') Exporting personal vault to a password-encrypted file..."
+    log_info "Exporting personal vault to a password-encrypted file..."
     run_export "personal vault" --format encrypted_json --output "$runtime_save_folder"
 fi
 personal_exported=$((exports_failed == 0))
@@ -509,13 +509,13 @@ if ! items_json=$(bw list items); then
     listings_failed=$((listings_failed + 1))
     items_listed=0
     items_json='[]'
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not list the vault items, so no attachments were saved."
+    log_error "Could not list the vault items, so no attachments were saved."
 fi
 # An item without attachments carries an empty array, not null, so counting the
 # attachments themselves is the only way to tell whether there is work to do.
-if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]]; then
-    echo
-    echo "$(date '+%F %T') Saving attachments..."
+attachments_total=$(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json")
+if [[ $attachments_total -gt 0 ]]; then
+    log_info "Saving $attachments_total attachment(s) from $(jq '[.[] | select((.attachments // []) | length > 0)] | length' <<<"$items_json") item(s)..."
     # To be encrypted, they are downloaded to a private folder inside the
     # container first, so no plain copy ever reaches the attachments volume (or
     # a snapshot of it). close_session removes that folder.
@@ -523,7 +523,7 @@ if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]];
     if [[ $attachments_encryption -eq 1 ]]; then
         if ! attachments_staging=$(mktemp -d "${TMPDIR:-/tmp}/bw-export-attachments.XXXXXX"); then
             attachments_staging=""
-            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not create a temporary folder for the attachments."
+            log_error "Could not create a temporary folder for the attachments."
             exit 1
         fi
         attachments_target=$attachments_staging/
@@ -531,14 +531,18 @@ if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]];
     # The loop runs in this shell (process substitution, not a pipe), so the
     # count survives it. A failed download is only reported by the CLI's exit
     # status; on stdout it looks much like a successful one.
-    # The CLI ends its "Saved <path>" without a newline, which ran every
-    # attachment into one line, so it is captured and printed with one.
+    # The CLI's "Saved <path>" is not logged: the path holds the item's name and
+    # the file's name, which are vault data (a person's name, an ID number). A
+    # failure is logged with the item's ID and the attachment's position, which
+    # is enough to find it in the vault without naming it.
+    attachment_index=0
     while IFS=$'\t' read -r item_id file_name output_dir; do
+        attachment_index=$((attachment_index + 1))
         rc=0
-        saved=$(bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir") || rc=$?
-        [[ -n "$saved" ]] && printf '%s\n' "$saved"
+        bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir" >/dev/null || rc=$?
         if [[ $rc -ne 0 ]]; then
             attachments_failed=$((attachments_failed + 1))
+            log_warn "Attachment $attachment_index of $attachments_total (item $item_id) could not be saved."
         else
             attachments_saved=$((attachments_saved + 1))
         fi
@@ -552,21 +556,21 @@ if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]];
             $dir + (if $folder == "" then "unnamed" else $folder end) + "/" ]
         | @tsv' <<<"$items_json")
     if [[ $attachments_failed -gt 0 ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: $attachments_failed attachment(s) could not be saved."
-        echo "$(date '+%F %T') A reverse proxy that intercepts /attachments/ is a common cause: the"
-        echo "$(date '+%F %T') CLI is handed a login page and cannot decrypt it. Check that path is reachable."
+        log_error "$attachments_failed attachment(s) could not be saved."
+        log_hint "A reverse proxy that intercepts /attachments/ is a common cause: the CLI is handed a login page and cannot decrypt it. Check that path is reachable."
     fi
+    log_info "Attachments: $attachments_saved saved, $attachments_failed failed."
     # What was saved is encrypted even when some downloads failed: a partial
     # backup is still worth keeping, and the run is reported as incomplete anyway.
     # If encryption fails there is no plain fallback; the run fails instead.
     if [[ $attachments_encryption -eq 1 ]] && [[ $attachments_saved -gt 0 ]]; then
-        echo "$(date '+%F %T') Encrypting the attachments..."
+        log_info "Encrypting the attachments..."
         attachments_archive="${runtime_save_folder_attachments%/}/attachments.tar.gz.gpg"
         if encrypt_folder "$attachments_staging" "$attachments_archive"; then
-            echo "$(date '+%F %T') Saved $attachments_archive"
+            log_info "Saved $attachments_archive"
         else
             archive_failed=1
-            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: The attachments could not be encrypted, so none were kept."
+            log_error "The attachments could not be encrypted, so none were kept."
         fi
     fi
     if [[ -n $attachments_staging ]]; then
@@ -574,8 +578,7 @@ if [[ $(jq '[.[] | (.attachments // [])[]] | length' <<<"$items_json") -gt 0 ]];
         attachments_staging=""
     fi
 elif [[ $items_listed -eq 1 ]]; then
-    echo
-    echo "$(date '+%F %T') No attachments exist, so nothing to export."
+    log_info "No attachments exist, so nothing to export."
 fi
 
 # 3. Report items in the Trash (cannot be exported)
@@ -583,7 +586,7 @@ trash_count=$(bw list items --trash | jq -r '. | length')
 
 if [[ $trash_count -gt 0 ]]; then
 
-    echo -e "\n$(date '+%F %T') ${Cyan}Info: You have $trash_count items in the trash that cannot be exported."
+    log_info "You have $trash_count items in the trash that cannot be exported."
 
 fi
 
@@ -623,32 +626,26 @@ elif [[ $organization_list == "" ]]; then
     else
         listings_failed=$((listings_failed + 1))
         orgs_json='[]'
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not list the organizations, so none were exported."
+        log_error "Could not list the organizations, so none were exported."
     fi
-    # The name is chosen by the organization's owner, so control characters are
-    # replaced and it is printed with %s, never interpreted.
-    while IFS=$'\t' read -r org_id org_verdict org_name org_reason; do
+    # Only the ID is logged: it is what BW_ORGANIZATIONS_LIST takes, and the
+    # name is vault data, which the log never carries.
+    while IFS=$'\t' read -r org_id org_verdict org_reason; do
         if [[ $org_verdict == export ]]; then
             organization_list+="${organization_list:+,}$org_id"
         else
             organizations_skipped=$((organizations_skipped + 1))
-            printf '\n%s %bInfo: Skipping organization "%s" (%s): %s.\n' \
-                "$(date '+%F %T')" "$Cyan" "$org_name" "$org_id" "$org_reason"
+            log_info "Skipping organization $org_id: $org_reason."
             if [[ $org_verdict == custom ]]; then
-                echo "$(date '+%F %T') If it may, add its ID to BW_ORGANIZATIONS_LIST."
+                log_hint "If it may, add its ID to BW_ORGANIZATIONS_LIST."
             fi
         fi
     done < <(jq -r "$org_export_blocker"'
         .[] | blocker as $why
-        | (.name // "" | gsub("[[:cntrl:]]"; "_")) as $name
         | [ .id,
             (if $why == "" then "export" elif .type == 4 then "custom" else "skip" end),
-            (if $name == "" then "(unnamed)" else $name end),
             $why ]
         | join("\t")' <<<"$orgs_json")
-    if [[ -n "$organization_list" ]]; then
-        echo -e "\n$(date '+%F %T') ${Cyan}Info: No  BW_ORGANIZATIONS_LIST provided. Exporting every organization you own or administer"
-    fi
 else
     # Here the listing only explains a failed export, so failing is not an error.
     orgs_json=$(bw list organizations 2>/dev/null) || orgs_json='[]'
@@ -659,12 +656,10 @@ if [[ -n "$organization_list" ]]; then
     for org_id in "${array[@]}"; do
         failed_before=$exports_failed
         if [[ $password1 == "" ]]; then
-            echo
-            echo "$(date '+%F %T') Exporting organization vault to an unencrypted file..."
+            log_info "Exporting organization $org_id to an unencrypted file..."
             run_export "organization vault $org_id" --organizationid "$org_id" --format json --output "$runtime_save_folder"
         else
-            echo
-            echo "$(date '+%F %T') Exporting organization vault to a password-encrypted file..."
+            log_info "Exporting organization $org_id to a password-encrypted file..."
             run_export "organization vault $org_id" --organizationid "$org_id" --format encrypted_json --output "$runtime_save_folder"
         fi
         if [[ $exports_failed -eq $failed_before ]]; then
@@ -674,24 +669,21 @@ if [[ -n "$organization_list" ]]; then
             org_reason=$(jq -r --arg id "$org_id" "$org_export_blocker"'
                 first(.[] | select(.id == $id) | blocker) // ""' <<<"$orgs_json" 2>/dev/null) || org_reason=""
             if [[ -n "$org_reason" ]]; then
-                echo "$(date '+%F %T') Hint: $org_reason. Only a confirmed Owner or Admin, or a custom role allowed to, can export an organization."
-                echo "$(date '+%F %T') Remove it from BW_ORGANIZATIONS_LIST."
+                log_hint "$org_reason. Only a confirmed Owner or Admin, or a custom role allowed to, can export an organization."
+                log_hint "Remove it from BW_ORGANIZATIONS_LIST."
             fi
         fi
     done
 elif [[ $organizations_skipped -gt 0 ]]; then
-    echo
-    echo "$(date '+%F %T') None of your organizations can be exported with your role, so none were exported."
+    log_info "None of your organizations can be exported with your role, so none were exported."
 elif [[ $orgs_listed -eq 1 ]]; then
-    echo
-    echo "$(date '+%F %T') No organizational vault exists, so nothing to export."
+    log_info "No organizational vault exists, so nothing to export."
 fi
 
-echo
 if [[ $((exports_failed + listings_failed)) -gt 0 ]]; then
-    echo -e "$(date '+%F %T') ${IYellow}ERROR: $exports_failed vault export(s) and $listings_failed vault listing(s) failed."
+    log_error "$exports_failed vault export(s) and $listings_failed vault listing(s) failed."
 else
-    echo "$(date '+%F %T') Vault export complete."
+    log_info "Vault export complete."
 fi
 
 # One pass over what this run wrote, for the filesystems where the umask is not
@@ -700,11 +692,10 @@ fi
 # modes, such as an NTFS share, says so and is left alone: the run still worked.
 if [[ $backup_private -eq 1 ]]; then
     if ! chmod -R u+rwX,go-rwx "$runtime_save_folder" "$runtime_save_folder_attachments" 2>/dev/null; then
-        echo -e "\n$(date '+%F %T') ${IYellow}Warning: could not restrict the permissions of this backup. Its filesystem may not support them."
+        log_warn "Could not restrict the permissions of this backup. Its filesystem may not support them."
     fi
 fi
 
-echo
 close_session
 
 # Rotation deletes old backups to make room for this one. When this one is
@@ -728,39 +719,39 @@ rotate_folder() {
         backups_to_delete "${KEEP_LAST_BACKUPS}" "${KEEP_GFS}") || return 1
     [[ -n $doomed ]] || return 0
     while IFS= read -r name; do
-        echo -e "$(date '+%F %T') ${Blue} Deleting exported $what: ${folder%/}/$name"
+        log_info "Deleting old $what backup: ${folder%/}/$name"
         rm -rf "${folder:?}/${name:?}"
         backups_deleted=$((backups_deleted + 1))
     done <<<"$doomed"
 }
 
 if [[ -n "${KEEP_LAST_BACKUPS}${KEEP_GFS}" ]] && [[ $failures -gt 0 ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}Warning: keeping all previous backups."
-    echo "$(date '+%F %T') This export is incomplete, so no older backup is rotated out for it."
-    echo "$(date '+%F %T') Fix the failure and run again."
+    log_warn "This backup is incomplete, so no old backup is deleted for it."
+    log_hint "Fix the failure; rotation resumes with the next complete backup."
 elif [[ -n "${KEEP_LAST_BACKUPS}${KEEP_GFS}" ]]; then
-    echo "$(date '+%F %T') Starting cleaning previous backups..."
+    log_info "Rotating old backups..."
     if [[ -n ${KEEP_LAST_BACKUPS} ]] && ! [[ ${KEEP_LAST_BACKUPS} =~ ^[0-9]+$ ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: KEEP_LAST_BACKUPS:${KEEP_LAST_BACKUPS} is not a number" >&2
+        log_error "KEEP_LAST_BACKUPS=${KEEP_LAST_BACKUPS} is not a number." >&2
         retention_failed=1
     fi
     if [[ -n ${KEEP_GFS} ]] && ! gfs_parse "${KEEP_GFS}" >/dev/null; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: KEEP_GFS:${KEEP_GFS} is not valid. Use counts of days, weeks, months and years, e.g. 7d:4w:6m" >&2
+        log_error "KEEP_GFS=${KEEP_GFS} is not valid." >&2
+        log_hint "Use counts of days, weeks, months and years, e.g. 7d:4w:6m." >&2
         retention_failed=1
     fi
     if [[ $retention_failed -eq 0 ]]; then
-        [[ -n ${KEEP_LAST_BACKUPS} ]] && echo -e "$(date '+%F %T') ${Cyan}Info: Keeping the last ${KEEP_LAST_BACKUPS} backup(s)."
+        [[ -n ${KEEP_LAST_BACKUPS} ]] && log_info "Keeping the last ${KEEP_LAST_BACKUPS} backup(s)."
         if [[ -n ${KEEP_GFS} ]]; then
             read -r gfs_d gfs_w gfs_m gfs_y <<<"$(gfs_parse "${KEEP_GFS}")"
-            echo -e "$(date '+%F %T') ${Cyan}Info: Keeping the newest backup of each of the last $gfs_d day(s), $gfs_w week(s), $gfs_m month(s) and $gfs_y year(s)."
+            log_info "Keeping the newest backup of each of the last $gfs_d day(s), $gfs_w week(s), $gfs_m month(s) and $gfs_y year(s)."
         fi
         rotate_folder "$save_folder" "vault" || retention_failed=1
         rotate_folder "$save_folder_attachments" "attachment" || retention_failed=1
         if [[ $retention_failed -ne 0 ]]; then
-            echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Could not work out which old backups to delete, so none were."
+            log_error "Could not work out which old backups to delete, so none were."
         fi
     fi
-    echo "$(date '+%F %T') Finish clean previous backups... ($backups_deleted deleted)"
+    log_info "Old backups deleted: $backups_deleted."
 fi
 
 # What this run did, for the log and for the notification, which reads the
@@ -805,27 +796,24 @@ echo "-------------------"
 # A missing vault export or attachment is an incomplete backup, so say so and
 # fail. Silence here is what let a broken backup look healthy run after run.
 if [[ $exports_failed -gt 0 ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Exporting finished, but $exports_failed vault export(s) failed."
+    log_error "Exporting finished, but $exports_failed vault export(s) failed."
 fi
 if [[ $listings_failed -gt 0 ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Exporting finished, but $listings_failed vault listing(s) failed."
+    log_error "Exporting finished, but $listings_failed vault listing(s) failed."
 fi
 if [[ $attachments_failed -gt 0 ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Exporting finished, but $attachments_failed attachment(s) are missing."
+    log_error "Exporting finished, but $attachments_failed attachment(s) are missing."
 fi
 if [[ $archive_failed -gt 0 ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Exporting finished, but the attachments could not be encrypted."
+    log_error "Exporting finished, but the attachments could not be encrypted."
 fi
 if [[ $failures -gt 0 ]]; then
-    echo "$(date '+%F %T') This backup is incomplete."
-    echo
+    log_error "This backup is incomplete."
     exit 1
 fi
 if [[ $retention_failed -ne 0 ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: The backup is complete, but old backups were not rotated."
-    echo
+    log_error "The backup is complete, but old backups were not rotated."
     exit 1
 fi
 
-echo -e "\n$(date '+%F %T') ${IGreen} Info: Exporting finished. Have a good day"
-echo
+log_info "Export finished successfully."
