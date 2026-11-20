@@ -103,9 +103,13 @@ RUN echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" | sha256sum -c - &&
 # Installing BW_CLI_VERSION version of Bitwarden CLI.
 # ARG so a build can override it (--build-arg BW_CLI_VERSION=...), ENV so the
 # version stays readable in the image. The default is the pinned, tested one.
+# From cli-v2026.11.0 Bitwarden renamed bw-linux-<ver>.zip to
+# bw-bit-linux-<ver>.zip, the same full build under a new name; bw-oss-linux is
+# the open-source-only build and is not used. Try the new name, then the old one,
+# so older pinned versions still build. curl -f fails on a 404 instead of saving
+# the error page as the zip.
 ARG BW_CLI_VERSION="2026.10.0"
 ENV BW_CLI_VERSION="${BW_CLI_VERSION}"
-ADD https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}/bw-linux-${BW_CLI_VERSION}.zip /tmp/bw.zip
 
 # Copy script
 COPY bw_export.sh /app/bw_export.sh
@@ -116,7 +120,11 @@ COPY root/ /
 # /app/bw is removed in this same layer once installed: left behind, the image
 # carried the ~137 MB binary twice, and nothing runs it from /app (bw resolves
 # to /usr/local/bin/bw). Deleting it in a later RUN would not shrink the image.
-RUN unzip /tmp/bw.zip && \
+RUN base="https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}" && \
+    (curl -fsSL "${base}/bw-bit-linux-${BW_CLI_VERSION}.zip" -o /tmp/bw.zip || \
+     curl -fsSL "${base}/bw-linux-${BW_CLI_VERSION}.zip" -o /tmp/bw.zip) && \
+    unzip /tmp/bw.zip && \
+    rm -f /tmp/bw.zip && \
     chmod +x /app/bw && \
     install /app/bw /usr/local/bin/ && \
     rm -f /app/bw && \
