@@ -52,6 +52,8 @@ services:
       # Encryption: exports and attachments.
       - EXPORT_PASSWORD_FILE=/run/secrets/exportpassword
       - ENCRYPT_ATTACHMENTS=true
+      # Only the user above can read what a run writes (700 / 600).
+      - BACKUP_PERMISSIONS=private
       # Server: leave commented out for bitwarden.com.
       # - BW_URL_SERVER=https://vault.example.com
       # Schedule.

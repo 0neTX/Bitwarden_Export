@@ -20,7 +20,8 @@ setup() {
   unset PW BW_FAIL_CONFIG BW_FAIL_LOGIN BW_FAIL_LOGOUT BITWARDENCLI_APPDATA_DIR \
         BW_ITEMS_FILE BW_ATTACHLOG BW_FAIL_ATTACH KEEP_LAST_BACKUPS \
         BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST BW_FAIL_LIST EXP BW_EXPORT_NOFILE \
-        BW_ORGS_JSON BW_DENY_EXPORT ENCRYPT_ATTACHMENTS KEEP_GFS TMPDIR
+        BW_ORGS_JSON BW_DENY_EXPORT ENCRYPT_ATTACHMENTS KEEP_GFS TMPDIR \
+        BACKUP_PERMISSIONS BW_WRAP_DIR
   rm -rf "$SP/sbx"; mkdir -p "$SP/sbx/out" "$SP/sbx/att"
   export BW_STATE="$SP/sbx/state" BW_CALLLOG="$SP/sbx/calls"
   : > "$BW_CALLLOG"
@@ -28,7 +29,8 @@ setup() {
 }
 
 run() {
-  ( export PATH="$SP/mock:$PATH" \
+  # BW_WRAP_DIR: a folder searched before the mock, for a test's own bw.
+  ( export PATH="${BW_WRAP_DIR:+$BW_WRAP_DIR:}$SP/mock:$PATH" \
       OUTPUT_PATH="$SP/sbx/out" ATTACHMENTS_PATH="$SP/sbx/att" \
       BW_URL_SERVER="https://vw.example.com" \
       BW_CLIENTID=id BW_CLIENTSECRET=secret BW_PASSWORD="${PW:-correct-pw}" \
@@ -790,6 +792,152 @@ else
   check "names the folder and the uid" "$(grep -q "Cannot write to $SP/sbx/out as uid $(id -u)" "$SP/sbx/output"; echo $?)" "$(grep ERROR "$SP/sbx/output")"
   check "no bw calls made" "$([ ! -s "$SP/sbx/calls" ]; echo $?)" "$(cat "$SP/sbx/calls")"
 fi
+
+# Every file and folder a run wrote under $1, with its mode, one per line.
+run_modes() { find "$1" -mindepth 1 -printf '%m %P\n' | sort -k2; }
+# Anything under $1's run folders that group or others can touch.
+open_to_others() { find "$SP/sbx/out" "$SP/sbx/att" -mindepth 2 -perm /077; }
+
+echo "=== T56: without BACKUP_PERMISSIONS the modes are what they always were ==="
+# The mock writes its files with the umask, as a plain program does; the real
+# CLI writes 600 and 700 whatever the umask. What is checked here is that the
+# script itself changes nothing without the variable.
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach" BW_ITEMS_FILE="$SP/sbx/items.json"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+rc=$(umask 022; run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "run folder is 755" "$([ "$(stat -c %a "$SP"/sbx/out/*-bw-export)" = 755 ]; echo $?)" "$(run_modes "$SP/sbx/out")"
+check "attachments folders are 755" "$([ "$(stat -c %a "$SP"/sbx/att/*-bw-export "$SP"/sbx/att/*-bw-export/Doc | sort -u)" = 755 ]; echo $?)" "$(run_modes "$SP/sbx/att")"
+check "files follow the umask, as before (644)" "$([ "$(stat -c %a "$SP"/sbx/out/*-bw-export/*.json "$SP"/sbx/att/*-bw-export/Doc/a.pdf | sort -u)" = 644 ]; echo $?)" "$(run_modes "$SP/sbx")"
+check "does not mention it" "$(! grep -q 'BACKUP_PERMISSIONS' "$SP/sbx/output"; echo $?)" "$(grep BACKUP "$SP/sbx/output")"
+for v in default DEFAULT; do
+  setup ""; export BW_REAL_PW=correct-pw BW_ITEMS_FILE="$SP/sbx/items.json"
+  rc=$(export BACKUP_PERMISSIONS=$v; umask 022; run)
+  check "'$v' is the same as unset" "$([ "$rc" = 0 ] && [ "$(stat -c %a "$SP"/sbx/out/*-bw-export)" = 755 ]; echo $?)" "rc=$rc"
+done
+
+echo "=== T57: BACKUP_PERMISSIONS=private makes every folder 700 and every file 600 ==="
+setup ""
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach" BW_ITEMS_FILE="$SP/sbx/items.json"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]},{"id":"i2","name":".ssh","attachments":[{"fileName":"id_ed25519"}]}]' > "$SP/sbx/items.json"
+given_modes=$(stat -c %a "$SP/sbx/out" "$SP/sbx/att")
+rc=$(export BACKUP_PERMISSIONS=private; umask 022; run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(tail -4 "$SP/sbx/output")"
+check "run folders are 700" "$([ "$(stat -c %a "$SP"/sbx/out/*-bw-export "$SP"/sbx/att/*-bw-export | sort -u)" = 700 ]; echo $?)" "$(run_modes "$SP/sbx")"
+check "item folders are 700" "$([ "$(stat -c %a "$SP"/sbx/att/*-bw-export/Doc "$SP"/sbx/att/*-bw-export/.ssh | sort -u)" = 700 ]; echo $?)" "$(run_modes "$SP/sbx/att")"
+check "the export and the attachments are 600" "$([ "$(stat -c %a "$SP"/sbx/out/*-bw-export/*.json "$SP"/sbx/att/*-bw-export/Doc/a.pdf "$SP"/sbx/att/*-bw-export/.ssh/id_ed25519 | sort -u)" = 600 ]; echo $?)" "$(run_modes "$SP/sbx")"
+check "nothing in a run folder is open to others" "$([ -z "$(open_to_others)" ]; echo $?)" "$(open_to_others)"
+check "the folders it was given are left as they were" "$([ "$(stat -c %a "$SP/sbx/out" "$SP/sbx/att")" = "$given_modes" ]; echo $?)" "before: $given_modes; now: $(stat -c %a "$SP/sbx/out" "$SP/sbx/att")"
+check "says so" "$(grep -q 'BACKUP_PERMISSIONS=private' "$SP/sbx/output"; echo $?)" "$(head -20 "$SP/sbx/output")"
+rc=$(export BACKUP_PERMISSIONS=PRIVATE; umask 022; run)
+check "the value is case-insensitive" "$([ "$rc" = 0 ] && [ "$(stat -c %a "$SP"/sbx/out/*-bw-export | sort -u | tail -n 1)" = 700 ]; echo $?)" "rc=$rc $(run_modes "$SP/sbx/out")"
+# The attachments archive is written by gpg, under its own file creation rules.
+setup ""
+export BW_REAL_PW=correct-pw BW_ITEMS_FILE="$SP/sbx/items.json"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+rc=$(export BACKUP_PERMISSIONS=private ENCRYPT_ATTACHMENTS=true; umask 022; run)
+check "the encrypted archive is 600 too" "$([ "$rc" = 0 ] && [ "$(stat -c %a "$SP"/sbx/att/*-bw-export/attachments.tar.gz.gpg)" = 600 ] && [ -z "$(open_to_others)" ]; echo $?)" "rc=$rc $(run_modes "$SP/sbx/att")"
+# Without encryption and without a password, the unencrypted vault is the case that matters most.
+setup ""
+export BW_REAL_PW=correct-pw EXP=''
+rc=$(export BACKUP_PERMISSIONS=private; umask 022; run)
+check "an unencrypted export is 600" "$([ "$rc" = 0 ] && [ "$(stat -c %a "$SP"/sbx/out/*-bw-export/export-personal.json)" = 600 ]; echo $?)" "rc=$rc $(run_modes "$SP/sbx/out")"
+
+echo "=== T58: the umask is not the whole story: files a filesystem opens up are closed again ==="
+setup ""
+mkdir -p "$SP/sbx/aclbw"
+# A bw that does what a share with default ACLs does: whatever the umask, what
+# an export or a download writes ends up open. Only those commands: the final
+# pass runs before the session is closed, and must be what closes them.
+cat > "$SP/sbx/aclbw/bw" <<ACL
+#!/usr/bin/env bash
+"$SP/mock/bw" "\$@"; rc=\$?
+case "\$1" in export|get) chmod -R a+rwX "$SP/sbx/out" "$SP/sbx/att" 2>/dev/null ;; esac
+exit \$rc
+ACL
+chmod +x "$SP/sbx/aclbw/bw"
+export BW_REAL_PW=correct-pw BW_ITEMS_FILE="$SP/sbx/items.json"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+rc=$(export BACKUP_PERMISSIONS=private; BW_WRAP_DIR="$SP/sbx/aclbw" run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "the run's folders and files are closed again" "$([ -z "$(open_to_others)" ]; echo $?)" "$(open_to_others)"
+setup ""
+mkdir -p "$SP/sbx/aclbw"
+cp "$SP/mock/bw" "$SP/sbx/aclbw/real-bw"
+cat > "$SP/sbx/aclbw/bw" <<ACL
+#!/usr/bin/env bash
+"$SP/mock/bw" "\$@"; rc=\$?
+case "\$1" in export|get) chmod -R a+rwX "$SP/sbx/out" "$SP/sbx/att" 2>/dev/null ;; esac
+exit \$rc
+ACL
+chmod +x "$SP/sbx/aclbw/bw"
+export BW_REAL_PW=correct-pw
+rc=$(export BACKUP_PERMISSIONS=default; BW_WRAP_DIR="$SP/sbx/aclbw" run)
+check "left alone when not asked: it stays open" "$([ "$rc" = 0 ] && [ -n "$(open_to_others)" ]; echo $?)" "rc=$rc"
+
+echo "=== T58b: there is no moment when a file is more open than it ends up ==="
+setup ""
+mkdir -p "$SP/sbx/snapbw"
+# A bw that notes, before every call, whatever the run has already written that
+# others could read. With the umask there is never any; the final pass alone
+# would leave the export open for the whole run.
+cat > "$SP/sbx/snapbw/bw" <<SNAP
+#!/usr/bin/env bash
+find "$SP/sbx/out" "$SP/sbx/att" -mindepth 1 -perm /077 >> "$SP/sbx/exposed"
+exec "$SP/mock/bw" "\$@"
+SNAP
+chmod +x "$SP/sbx/snapbw/bw"; : > "$SP/sbx/exposed"
+export BW_REAL_PW=correct-pw BW_ITEMS_FILE="$SP/sbx/items.json"
+printf '%s' '[{"id":"i1","name":"Doc","attachments":[{"fileName":"a.pdf"}]}]' > "$SP/sbx/items.json"
+rc=$(export BACKUP_PERMISSIONS=private; umask 022; BW_WRAP_DIR="$SP/sbx/snapbw" run)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc"
+check "nothing was ever readable by others while the run went on" "$([ ! -s "$SP/sbx/exposed" ]; echo $?)" "$(sort -u "$SP/sbx/exposed")"
+setup ""; mkdir -p "$SP/sbx/snapbw"
+cat > "$SP/sbx/snapbw/bw" <<SNAP
+#!/usr/bin/env bash
+find "$SP/sbx/out" "$SP/sbx/att" -mindepth 1 -perm /077 >> "$SP/sbx/exposed"
+exec "$SP/mock/bw" "\$@"
+SNAP
+chmod +x "$SP/sbx/snapbw/bw"; : > "$SP/sbx/exposed"
+export BW_REAL_PW=correct-pw
+rc=$(umask 022; BW_WRAP_DIR="$SP/sbx/snapbw" run)
+check "the probe does see an open file when not private" "$([ -s "$SP/sbx/exposed" ]; echo $?)" "probe never fired"
+
+# The run's own two folders, on a share whose default ACLs give new folders
+# their mode and ignore the umask: closed straight after they are made.
+setup ""
+mkdir -p "$SP/sbx/snapbw" "$SP/sbx/aclmk"
+cat > "$SP/sbx/snapbw/bw" <<SNAP
+#!/usr/bin/env bash
+find "$SP/sbx/out" "$SP/sbx/att" -mindepth 1 -perm /077 >> "$SP/sbx/exposed"
+exec "$SP/mock/bw" "\$@"
+SNAP
+cat > "$SP/sbx/aclmk/mkdir" <<MK
+#!/usr/bin/env bash
+/bin/mkdir "\$@" || exit \$?
+# Only the script's own folders (plain mkdir); the mock bw uses "mkdir -p".
+case "\$1" in -*) exit 0 ;; esac
+for a in "\$@"; do chmod 777 "\$a"; done
+MK
+chmod +x "$SP/sbx/snapbw/bw" "$SP/sbx/aclmk/mkdir"; : > "$SP/sbx/exposed"
+export BW_REAL_PW=correct-pw
+rc=$(export BACKUP_PERMISSIONS=private; PATH="$SP/sbx/aclmk:$PATH" BW_WRAP_DIR="$SP/sbx/snapbw" run)
+check "the run's folders are closed as soon as they exist" "$([ "$rc" = 0 ] && [ ! -s "$SP/sbx/exposed" ]; echo $?)" "rc=$rc $(sort -u "$SP/sbx/exposed")"
+# Two runs in one second share a folder name, and an existing folder is reused.
+rm -rf "$SP"/sbx/out/* "$SP"/sbx/att/*
+: > "$SP/sbx/exposed"
+rc=$(PATH="$SP/sbx/aclmk:$PATH" BW_WRAP_DIR="$SP/sbx/snapbw" run)
+check "the shadowed mkdir does open them when not private" "$([ "$rc" = 0 ] && [ -s "$SP/sbx/exposed" ]; echo $?)" "probe never fired"
+unset BW_ITEMS_FILE
+
+echo "=== T59: an invalid BACKUP_PERMISSIONS stops before touching the CLI ==="
+setup ""
+export BW_REAL_PW=correct-pw
+for v in 700 public yes true; do
+  rc=$(export BACKUP_PERMISSIONS=$v; run)
+  check "'$v' is refused" "$([ "$rc" = 1 ] && grep -q "BACKUP_PERMISSIONS must be private or default, not \"$v\"" "$SP/sbx/output" && [ ! -s "$SP/sbx/calls" ]; echo $?)" "rc=$rc $(grep ERROR "$SP/sbx/output")"
+done
 
 echo "=== TM: an anonymous volume is told apart from a real mount (mountinfo) ==="
 setup ""

@@ -236,6 +236,26 @@ case "${ENCRYPT_ATTACHMENTS,,}" in
         ;;
 esac
 
+# Who can read what a run writes. The CLI already saves its files as 600 and
+# the folder of each vault item as 700. What the container creates itself takes
+# its umask, normally 022: each run's folder is 755 (anyone can list the item
+# names and file names in it) and the encrypted attachments archive 644.
+# BACKUP_PERMISSIONS=private makes them 700 and 600, so only their owner can
+# read them. Off by default, because it takes access away from anyone who lists
+# or copies the backups as another user (a NAS share, a backup tool).
+backup_private=0
+case "${BACKUP_PERMISSIONS,,}" in
+    "" | default) ;;
+    private)
+        backup_private=1
+        echo -e "\n$(date '+%F %T') ${Cyan}Info: BACKUP_PERMISSIONS=private. The backup's folders are 700 and its files 600."
+        ;;
+    *)
+        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: BACKUP_PERMISSIONS must be private or default, not \"${BACKUP_PERMISSIONS}\"."
+        params_validated=-1
+        ;;
+esac
+
 # Check if required parameters has beed proviced.
 if [[ $params_validated != 0 ]]; then
     echo -e "\n$(date '+%F %T') ${IYellow}One or more required environment variables have not been set."
@@ -245,6 +265,13 @@ if [[ $params_validated != 0 ]]; then
 fi
 
 session_closed=0
+
+# From here on, nothing this run writes is readable by anyone else. Set before
+# the CLI creates anything, so there is no moment when a file is more open than
+# it ends up. mkdir and gpg honour it; the CLI's own modes are already stricter.
+if [[ $backup_private -eq 1 ]]; then
+    umask 077
+fi
 
 # Close the Bitwarden CLI session and wipe the credentials from the environment.
 # Idempotent: safe to call explicitly and from the EXIT trap.
@@ -357,9 +384,17 @@ runtime_save_folder_attachments=$save_folder_attachments/$working_folder/
 if [[ ! -d "$runtime_save_folder" ]]; then
     mkdir "$runtime_save_folder"
 fi
+# Explicit as well as the umask: a folder with default ACLs, as many NAS shares
+# have, gives new files the ACL's mode and ignores the umask.
+if [[ $backup_private -eq 1 ]]; then
+    chmod 700 "$runtime_save_folder" 2>/dev/null
+fi
 
 if [[ ! -d "$runtime_save_folder_attachments" ]]; then
     mkdir "$runtime_save_folder_attachments"
+fi
+if [[ $backup_private -eq 1 ]]; then
+    chmod 700 "$runtime_save_folder_attachments" 2>/dev/null
 fi
 
 # Every export is checked: the CLI reports a failure (an unwritable folder, a
@@ -649,6 +684,16 @@ if [[ $((exports_failed + listings_failed)) -gt 0 ]]; then
     echo -e "$(date '+%F %T') ${IYellow}ERROR: $exports_failed vault export(s) and $listings_failed vault listing(s) failed."
 else
     echo "$(date '+%F %T') Vault export complete."
+fi
+
+# One pass over what this run wrote, for the filesystems where the umask is not
+# the whole story (default ACLs). Only this run's two folders, never the paths
+# they sit in, which belong to whoever mounted them. A filesystem that has no
+# modes, such as an NTFS share, says so and is left alone: the run still worked.
+if [[ $backup_private -eq 1 ]]; then
+    if ! chmod -R u+rwX,go-rwx "$runtime_save_folder" "$runtime_save_folder_attachments" 2>/dev/null; then
+        echo -e "\n$(date '+%F %T') ${IYellow}Warning: could not restrict the permissions of this backup. Its filesystem may not support them."
+    fi
 fi
 
 echo
