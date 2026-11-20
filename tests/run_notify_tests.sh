@@ -10,6 +10,7 @@
 # passed to shellcheck as an input of its own in ci.yml.
 # shellcheck disable=SC1091,SC2030,SC2031
 SP="$(cd "$(dirname "$0")" && pwd)"
+export LOG_LIB="$SP/../root/usr/local/lib/bw-export/log.sh"
 LIB="${LIB:-$SP/../root/usr/local/lib/bw-export/notify.sh}"
 SBX="$SP/sbx/notify"
 pass=0; fail=0
@@ -64,7 +65,7 @@ echo "=== N4: a failing service neither changes the status nor leaks the token =
 reset
 ( set -e; NOTIFICATION_URL="$URL" STUB_FAIL=1 send_message "boom"; echo "still running rc=$?" ) > "$SBX/out" 2>&1
 eq "returns 0, set -e survives" "still running rc=0" "$(tail -n 1 "$SBX/out")"
-eq "warns"                      "1" "$(grep -c 'sending the notification failed' "$SBX/out")"
+eq "warns"                      "1" "$(grep -c 'Sending the notification failed' "$SBX/out")"
 eq "error text with the token dropped" "0" "$(grep -c SECRET "$SBX/out")"
 
 echo "=== N5: an empty message is replaced, since Telegram rejects one ==="

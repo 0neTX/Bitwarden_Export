@@ -18,6 +18,8 @@ LABEL org.opencontainers.image.description="Bitwarden exporter docker container"
 LABEL org.opencontainers.image.version="${IMAGE_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/0neTX/Bitwarden_Export"
 LABEL org.opencontainers.image.url="https://github.com/0neTX/Bitwarden_Export"
+# Readable at run time too, for the first line of every run's log.
+ENV BW_EXPORT_VERSION="${IMAGE_VERSION}"
 LABEL org.opencontainers.image.documentation="https://github.com/0neTX/Bitwarden_Export#readme"
 LABEL org.opencontainers.image.vendor="0neTX"
 LABEL org.opencontainers.image.authors="0neTX (https://github.com/0neTX)"

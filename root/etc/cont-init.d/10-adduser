@@ -1,31 +1,25 @@
 #!/usr/bin/env bash
+# Maps the container's bitwarden user onto PUID/PGID and gives it the folders it
+# writes to. Runs as root, before the first export. The uid and gid it ends up
+# with are logged in each run's header (entrypoint.sh, run_header).
+
+# shellcheck disable=SC1090
+. "${LOG_LIB:-/usr/local/lib/bw-export/log.sh}"
 
 PUID=${PUID:-0}
 PGID=${PGID:-0}
 
-# GUID between 1-99 are typically reserved for system use, so we warn the user
+# Ids between 1 and 99 are typically reserved for system use.
 if [[ "$PUID" -lt 100 && "$PUID" -ne 0 ]]; then
-    echo "The provided PGID is below 100. This is typically reserved for system use and may cause unexpected behavior."
+    log_warn "PUID=$PUID is below 100. Ids that low are typically reserved for system use and may cause unexpected behaviour."
+fi
+if [[ "$PGID" -lt 100 && "$PGID" -ne 0 ]]; then
+    log_warn "PGID=$PGID is below 100. Ids that low are typically reserved for system use and may cause unexpected behaviour."
 fi
 
 groupmod -o -g "$PGID" bitwarden
 usermod -o -u "$PUID" bitwarden
 
-echo " _                                             _   ";
-echo "| |____      __      _____  ___ __   ___  _ __| |_ ";
-echo "| '_ \ \ /\ / /____ / _ \ \/ / '_ \ / _ \| '__| __|";
-echo "| |_) \ V  V /_____|  __/>  <| |_) | (_) | |  | |_ ";
-echo "|_.__/ \_/\_/       \___/_/\_\ .__/ \___/|_|   \__|";
-echo "                             |_|                   ";
-echo '
--------------------------------------
-GID/UID
--------------------------------------'
-echo "
-User uid:    $(id -u bitwarden)
-User gid:    $(id -g bitwarden)
--------------------------------------
-"
 chown -R  bitwarden:bitwarden /app
 chown -R  bitwarden:bitwarden /var/data
 chown -R  bitwarden:bitwarden /var/attachments

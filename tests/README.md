@@ -3,7 +3,10 @@
 Two layers:
 
 - **`run_tests.sh`** — assertions against `bw_export.sh` using a stateful mock
-  of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers.
+  of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers: `mock/curl`
+  answers like an unreachable server, so the log's server probe never leaves the
+  machine. It also checks that every log line has the one format and that no
+  secret, server address or vault name reaches the log.
 - **`run_ping_tests.sh`** — assertions against the `PING_URL` helpers in
   `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
   three-line stub for `curl`.
@@ -248,7 +251,7 @@ docker run --rm --network host \
 
 The listener logs `GET /ping/start` and then `GET /ping/1`, in that order. It
 answers 404 to both, which is useful rather than a problem: the container must
-log `Warning: monitoring ping (...) failed; continuing.` and still exit 1, not 0
+log `WARNING: Monitoring ping (...) failed; continuing.` and still exit 1, not 0
 and not 22. That is the non-fatal guarantee, seen from outside.
 
 ### Teardown

@@ -22,9 +22,8 @@
 
 single_script="${1:?usage: vaults.sh <path of bw_export.sh>}"
 
-IYellow='\033[0;93m'
-IGreen='\033[0;92m'
-Cyan='\033[0;36m'
+# shellcheck disable=SC1090
+. "${LOG_LIB:-/usr/local/lib/bw-export/log.sh}"
 
 # Each vault's own settings. The secret ones may also come as NAME_FILE.
 OWN_SECRETS=(BW_CLIENTID BW_CLIENTSECRET BW_PASSWORD)
@@ -73,10 +72,10 @@ vault_summary_lines() {
 }
 
 fail_config() {
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: $1"
+    log_error "$1"
     shift
     local line
-    for line in "$@"; do echo "$(date '+%F %T') $line"; done
+    for line in "$@"; do log_hint "$line"; done
     echo -e "\n----- Summary -----\nVaults: configuration error, nothing exported\n-------------------"
     exit 1
 }
@@ -130,7 +129,7 @@ while IFS= read -r var; do
         done
     done
     if [[ $matched -eq 0 ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}Warning: $var matches no vault in BW_VAULTS and no known setting; it is ignored."
+        log_warn "$var matches no vault in BW_VAULTS and no known setting; it is ignored."
     fi
 done < <(compgen -e | grep -E '^VAULT_' || true)
 
@@ -139,7 +138,7 @@ base_data="${OUTPUT_PATH:-/var/data}"
 base_attachments="${ATTACHMENTS_PATH:-/var/attachments}"
 base_appdata="${BITWARDENCLI_APPDATA_DIR:-$(pwd)}"
 
-echo -e "\n$(date '+%F %T') ${Cyan}Info: Exporting ${#names[@]} vault(s): ${names[*]}"
+log_info "Exporting ${#names[@]} vault(s), one after another: ${names[*]}"
 
 # --- Run each vault -------------------------------------------------------------
 stop=0
@@ -169,7 +168,8 @@ for i in "${!names[@]}"; do
         failed=$((failed + 1))
         continue
     fi
-    echo -e "\n$(date '+%F %T') ${Cyan}===== Vault $index/${#names[@]}: $folder ====="
+    echo
+    log_info "===== Vault $index of ${#names[@]}: $folder ====="
 
     # Inherited options as the vault sees them, to set up its folders.
     perms_var="VAULT_${upper}_BACKUP_PERMISSIONS"
@@ -194,7 +194,7 @@ for i in "${!names[@]}"; do
         fi
     done
     if [[ -n $setup_error ]]; then
-        echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Vault $folder: $setup_error."
+        log_error "Vault $folder: $setup_error."
         summary_lines+=("" "❌ $folder: $setup_error")
         failed=$((failed + 1))
         continue
@@ -281,7 +281,7 @@ if [[ $stop -ne 0 ]]; then
     exit "$stop"
 fi
 if [[ $failed -gt 0 ]]; then
-    echo -e "\n$(date '+%F %T') ${IYellow}ERROR: $failed of ${#names[@]} vault(s) failed."
+    log_error "$failed of ${#names[@]} vault(s) failed."
     exit 1
 fi
-echo -e "\n$(date '+%F %T') ${IGreen}Info: All ${#names[@]} vault(s) exported."
+log_info "All ${#names[@]} vault(s) exported."

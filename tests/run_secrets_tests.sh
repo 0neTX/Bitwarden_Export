@@ -5,6 +5,7 @@
 set -u
 
 SP="$(cd "$(dirname "$0")" && pwd)"
+export LOG_LIB="$SP/../root/usr/local/lib/bw-export/log.sh"
 LIB="${LIB:-$SP/../root/usr/local/lib/bw-export/secrets.sh}"
 SBX="$SP/sbx/secrets"
 pass=0; fail=0

@@ -3,6 +3,10 @@
 # cannot be sourced by a test. See tests/run_notify_tests.sh.
 # shellcheck shell=bash
 
+# Log lines in the image's one format (log.sh), loaded unless the caller did.
+# shellcheck disable=SC1090
+declare -F log_warn >/dev/null || . "${LOG_LIB:-/usr/local/lib/bw-export/log.sh}"
+
 if ! declare -F resolve_secret >/dev/null 2>&1; then
     # shellcheck disable=SC1091
     . "$(dirname "${BASH_SOURCE[0]}")/secrets.sh"
@@ -25,7 +29,7 @@ notify_level_warning() {
     value="$(printf '%s' "${NOTIFICATION_LEVEL:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
     case "$value" in
         "" | all | failure) ;;
-        *) echo -e "${Yellow:-}Warning: NOTIFICATION_LEVEL must be all or failure, not \"${NOTIFICATION_LEVEL}\". Sending every notification." ;;
+        *) log_warn "NOTIFICATION_LEVEL must be all or failure, not \"${NOTIFICATION_LEVEL}\". Sending every notification." ;;
     esac
 }
 
@@ -59,7 +63,7 @@ send_message() {
     [[ -z "$url" ]] && return 0
     [[ -z "$message" ]] && message="Bitwarden/Vaultwarden Export: (no log output to send)"
     if ! SHOUTRRR_URL="$url" "${SHOUTRRR_BIN:-/app/shoutrrr}" send -m "$message" 2>/dev/null; then
-        echo -e "${Yellow:-}Warning: sending the notification failed; continuing."
+        log_warn "Sending the notification failed; continuing."
     fi
     return 0
 }
