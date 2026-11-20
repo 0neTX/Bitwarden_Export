@@ -20,7 +20,7 @@ The unit suite is fast, needs no network and no containers:
 SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
 ```
 
-Expect `PASS=80 FAIL=0`. `tests/README.md` covers the rest, including the
+Expect `FAIL=0`. `tests/README.md` covers the rest, including the
 end-to-end suite that runs a real Vaultwarden behind TLS, and the two
 `entrypoint.sh` behaviours that can only be checked against a container.
 

@@ -465,6 +465,15 @@ gpg -d attachments.tar.gz.gpg | tar -xz
 
 GnuPG asks for the password, and the folders are recreated in the current directory, one per vault item.
 
+On **Windows**, install [Gpg4win](https://www.gpg4win.org/) and use two steps in PowerShell, because Windows PowerShell corrupts binary data sent through a pipe:
+
+```powershell
+gpg -o attachments.tar.gz -d attachments.tar.gz.gpg
+tar -xzf attachments.tar.gz
+```
+
+`tar` is part of Windows 10 and later. Kleopatra, which comes with Gpg4win, does the first step from the file's right-click menu (*Decrypt and verify*), and 7-Zip opens the resulting `.tar.gz`.
+
 ## Permissions of the backups
 
 The Bitwarden CLI already writes what it saves with restricted modes: the exports and the attachments are `600` and each vault item's folder is `700`, so another user of the host cannot read them. What is left open is what the container itself creates, with its `umask` (normally `022`):

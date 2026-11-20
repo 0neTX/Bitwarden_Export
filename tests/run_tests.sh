@@ -557,7 +557,7 @@ rc=$(run)
 check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
 check "never logged in" "$(! grep -q '^bw login' "$SP/sbx/calls"; echo $?)" "$(grep '^bw login' "$SP/sbx/calls")"
 check "names the variable" "$(grep -q 'BW_PASSWORD is set, but no value could be read' "$SP/sbx/output"; echo $?)" "$(grep -i 'bw_password' "$SP/sbx/output")"
-check "the path is not the password" "$(! grep -q 'bw-export-test-not-mounted' "$SP/sbx/state"; echo $?)" "$(cat "$SP/sbx/state")"
+check "the path is not the password" "$([ ! -e "$SP/sbx/state" ] || ! grep -q 'bw-export-test-not-mounted' "$SP/sbx/state"; echo $?)" "$(cat "$SP/sbx/state" 2>/dev/null)"
 
 echo "=== T43: a literal password that starts with / is used as is, without a warning ==="
 setup ""
@@ -779,7 +779,7 @@ check "no summary when login fails" "$(export BW_FAIL_LOGIN=1; run >/dev/null; !
 unset BW_FAIL_EXPORT BW_ORGANIZATIONS_LIST
 
 
-echo "=== T50: a folder this user cannot write to is named before anything runs ==="
+echo "=== T55b: a folder this user cannot write to is named before anything runs ==="
 if [ "$(id -u)" = 0 ]; then
   echo "  SKIP  root can write to any folder; run the suite as a normal user (CI does)"
 else
