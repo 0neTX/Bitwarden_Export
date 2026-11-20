@@ -108,7 +108,7 @@ RUN echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" | sha256sum -c - &&
 # the open-source-only build and is not used. Try the new name, then the old one,
 # so older pinned versions still build. curl -f fails on a 404 instead of saving
 # the error page as the zip.
-ARG BW_CLI_VERSION="2026.10.0"
+ARG BW_CLI_VERSION="2026.11.0"
 ENV BW_CLI_VERSION="${BW_CLI_VERSION}"
 
 # Copy script

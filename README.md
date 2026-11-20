@@ -66,7 +66,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 - [Docker](https://docker.com) or Podman. Linux, macOS and Windows all work; adapt the compose file to your host.
 - **Personal API key** for CLI authentication: [how to get it](https://bitwarden.com/help/personal-api-key/).
 - If you self-host, a server reachable over **HTTPS**. The Bitwarden CLI refuses plain-HTTP URLs.
-- **Vaultwarden 1.37.4 or later.** The bundled Bitwarden CLI (2026.10.0) calls an endpoint older Vaultwarden releases do not have, and the export then fails with `Failed to unlock vault with BW_PASSWORD` even though the password is right ([vaultwarden#7693](https://github.com/dani-garcia/vaultwarden/pull/7693)). bitwarden.com is not affected.
+- **Vaultwarden 1.37.4 or later.** The bundled Bitwarden CLI (2026.11.0) calls an endpoint older Vaultwarden releases do not have, and the export then fails with `Failed to unlock vault with BW_PASSWORD` even though the password is right ([vaultwarden#7693](https://github.com/dani-garcia/vaultwarden/pull/7693)). bitwarden.com is not affected.
 
 ## Quick start
 
