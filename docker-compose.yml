@@ -39,6 +39,7 @@ services:
       # Log, notifications and monitoring.
       # - FILE_LOG=/var/data/bw-export-logfile.log
       # - NOTIFICATION_URL=telegram://<token>@telegram?chats=<chat id>
+      # - NOTIFICATION_LEVEL=failure   # only a failed run notifies; default: all
       # - PING_URL=https://hc-ping.com/<your-uuid>
       # File ownership on the host (under rootless Podman, see compose.podman.yml).
       # - PUID=1000

@@ -226,6 +226,7 @@ Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `B
 | `CRON` | — (one-shot) | Standard 5-field cron expression (e.g. `0 3 * * *`) or macro (`@daily`, `@hourly`, etc., powered by `supercronic`). Validates the expression on startup (exiting `1` if invalid), runs an initial backup immediately, and keeps running for scheduled backups (skipping overlapping runs; if the initial backup fails, the scheduler keeps running). Recommended: set `restart: unless-stopped`. |
 | `TZ` | `UTC` | Timezone for logs and `CRON` schedules (e.g. `Europe/Madrid`, `America/New_York`). |
 | `NOTIFICATION_URL` | — | Shoutrrr URL for the start/success/failure messages. See [Notifications](#notifications). |
+| `NOTIFICATION_LEVEL` | `all` | `failure` sends a message only when a run fails. See [Notifications](#notifications). |
 | `PING_URL` | — | Watchdog endpoint pinged at start and on completion. See [Monitoring](#monitoring). |
 | `INFISICAL_TOKEN` | — | Infisical service token, to read the credentials from Infisical. See [Option B](#option-b-infisical). |
 | `INFISICAL_PATH` | token's own path | *Secrets Path* of that service token. |
@@ -342,6 +343,8 @@ See also [`docker-compose.infisical.sample.yml`](docker-compose.infisical.sample
 ## Notifications
 
 Set `NOTIFICATION_URL` to any [Shoutrrr service URL](https://shoutrrr.nickfedor.com/latest/services/overview/) and you get a message when the run starts, succeeds or fails. Both outcomes carry the [run summary](#what-it-produces) (duration, what was exported, organizations skipped, attachments saved, size), so a drop in the numbers shows without opening the log; a failure also carries the last lines of the log. The URL usually holds a token, so the container never prints it and hands it to Shoutrrr through the environment rather than on its command line. A notification that cannot be sent is logged without the address and does not change the backup's exit code.
+
+By default you get a message at the start and another at the end of every run, which on a daily schedule is two a day when all goes well. `NOTIFICATION_LEVEL=failure` sends only the failures, with the same summary and the last lines of the log; pair it with [`PING_URL`](#monitoring) so a run that never started is still noticed. Any other value is reported in the log and treated as `all`, since a typo should never be why an alert does not arrive.
 
 ### Telegram
 

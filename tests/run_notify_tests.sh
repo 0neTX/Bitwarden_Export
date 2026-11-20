@@ -119,6 +119,32 @@ reset
 eq "shoutrrr not run"  "no" "$([ -e "$SBX/argv" ] && echo yes || echo no)"
 eq "warns not mounted" "1"  "$(grep -c 'not mounted' "$SBX/out")"
 
+echo "=== N12: NOTIFICATION_LEVEL says which outcomes are wanted ==="
+lvl() { ( unset NOTIFICATION_LEVEL; [ "$#" -gt 0 ] && export NOTIFICATION_LEVEL="$1"; notify_level ); }
+want() { ( unset NOTIFICATION_LEVEL; [ "$2" != "<unset>" ] && export NOTIFICATION_LEVEL="$2"; notify_wanted "$1" && echo yes || echo no ); }
+eq "unset is all"            "all"     "$(lvl)"
+eq "empty is all"            "all"     "$(lvl '')"
+eq "all"                     "all"     "$(lvl all)"
+eq "failure"                 "failure" "$(lvl failure)"
+eq "case and spaces ignored" "failure" "$(lvl '  FAILURE ')"
+eq "a typo is all"           "all"     "$(lvl failures)"
+eq "start, unset"            "yes"     "$(want start '<unset>')"
+eq "success, all"            "yes"     "$(want success all)"
+eq "start, failure"          "no"      "$(want start failure)"
+eq "success, failure"        "no"      "$(want success failure)"
+eq "failure, failure"        "yes"     "$(want failure failure)"
+eq "failure, all"            "yes"     "$(want failure all)"
+eq "success, a typo"         "yes"     "$(want success failures)"
+
+echo "=== N13: only a value that is neither all nor failure warns ==="
+warn() { ( unset NOTIFICATION_LEVEL; [ "$#" -gt 0 ] && export NOTIFICATION_LEVEL="$1"; notify_level_warning ); }
+eq "unset: silent"   "0" "$(warn | grep -c Warning)"
+eq "empty: silent"   "0" "$(warn '' | grep -c Warning)"
+eq "all: silent"     "0" "$(warn all | grep -c Warning)"
+eq "FAILURE: silent" "0" "$(warn FAILURE | grep -c Warning)"
+eq "a typo warns"    "1" "$(warn errors | grep -c 'NOTIFICATION_LEVEL must be all or failure, not "errors"')"
+eq "and says all"    "1" "$(warn errors | grep -c 'Sending every notification')"
+
 echo
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" = 0 ]
