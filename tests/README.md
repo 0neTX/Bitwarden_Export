@@ -18,6 +18,10 @@ Two layers:
   `root/usr/local/lib/bw-export/retention.sh`, which decides the old backups
   `KEEP_LAST_BACKUPS` and `KEEP_GFS` delete. Driven with folder names only;
   nothing is created or deleted.
+- **`run_vaults_tests.sh`** — several vaults in one run (`BW_VAULTS`), through
+  `bw_export.sh` and the same mock: each vault's folders, key, server and CLI
+  session, a failing vault, inherited and per-vault options, configuration
+  errors, and that no vault's export sees another vault's variables.
 - **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.4 and a
   bw-export image built from the repo `Dockerfile`, used to validate issue #21
   end to end.

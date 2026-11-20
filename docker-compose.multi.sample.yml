@@ -1,0 +1,44 @@
+# Several vaults in one container: each one exported in turn, into a subfolder
+# of its own (./export/data/<name>, ./export/attachments/<name>).
+#
+#   docker compose -f docker-compose.multi.sample.yml up
+#
+# BW_VAULTS lists the vaults. Each vault's settings are its name in capitals
+# between VAULT_ and the usual variable name: VAULT_PERSONAL_BW_CLIENTID.
+# Names may use letters, digits and _ only.
+#
+# - Credentials and server belong to each vault and are never shared. Setting
+#   BW_CLIENTID, BW_CLIENTSECRET, BW_PASSWORD or BW_URL_SERVER without a VAULT_
+#   prefix as well is an error: it is one mode or the other.
+# - EXPORT_PASSWORD, BW_ORGANIZATIONS_LIST, ENCRYPT_ATTACHMENTS,
+#   BACKUP_PERMISSIONS, KEEP_LAST_BACKUPS and KEEP_GFS apply to every vault,
+#   unless a vault sets its own (VAULT_WORK_KEEP_GFS=...; empty turns it off).
+# - A vault that fails does not stop the others, and the run then exits 1. One
+#   notification and one PING_URL ping cover the whole run.
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      # The vaults, in the order they are exported.
+      - BW_VAULTS=personal,work
+      # personal: bitwarden.com (no server set).
+      - VAULT_PERSONAL_BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - VAULT_PERSONAL_BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - VAULT_PERSONAL_BW_PASSWORD=<BITWARDEN PASSWORD>
+      # work: a self-hosted server, with an export password of its own.
+      - VAULT_WORK_BW_URL_SERVER=https://vault.example.com
+      - VAULT_WORK_BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - VAULT_WORK_BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - VAULT_WORK_BW_PASSWORD=<BITWARDEN PASSWORD>
+      - VAULT_WORK_EXPORT_PASSWORD=<EXPORT PASSWORD FOR WORK>
+      # Shared by every vault that does not set its own.
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      # - KEEP_GFS=7d:4w:6m
+      # Log, notifications and monitoring: one for the whole run.
+      # - FILE_LOG=/var/data/bw-export-logfile.log
+      # - NOTIFICATION_URL=telegram://<token>@telegram?chats=<chat id>
+      # - PING_URL=https://hc-ping.com/<your-uuid>
