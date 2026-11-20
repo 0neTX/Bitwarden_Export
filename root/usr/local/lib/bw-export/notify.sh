@@ -8,6 +8,33 @@ if ! declare -F resolve_secret >/dev/null 2>&1; then
     . "$(dirname "${BASH_SOURCE[0]}")/secrets.sh"
 fi
 
+# Which outcomes are sent. NOTIFICATION_LEVEL is "all" (the default: start,
+# success and failure) or "failure" (only a failed run). Anything else counts as
+# "all": a typo must never be the reason an alert is not sent.
+notify_level() {
+    case "$(printf '%s' "${NOTIFICATION_LEVEL:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+        failure) echo failure ;;
+        *) echo all ;;
+    esac
+}
+
+# Prints a warning when NOTIFICATION_LEVEL is set to something that is neither
+# of its two values. Prints nothing otherwise.
+notify_level_warning() {
+    local value
+    value="$(printf '%s' "${NOTIFICATION_LEVEL:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    case "$value" in
+        "" | all | failure) ;;
+        *) echo -e "${Yellow:-}Warning: NOTIFICATION_LEVEL must be all or failure, not \"${NOTIFICATION_LEVEL}\". Sending every notification." ;;
+    esac
+}
+
+# True when a message of kind $1 (start, success or failure) is to be sent. A
+# failure always is.
+notify_wanted() {
+    [[ "$1" == failure ]] || [[ "$(notify_level)" == all ]]
+}
+
 # Sends $1 to NOTIFICATION_URL, or does nothing when that is not set.
 #
 # The URL carries the service's credentials (a Telegram bot token, a Gotify app

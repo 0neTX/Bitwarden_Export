@@ -93,6 +93,7 @@ cat > "$SBX/infisical" <<'STUB'
 #!/usr/bin/env bash
 d="${CRON_TEST_DIR:?}"
 echo "infisical:$*" >> "$d/calls"
+[ -n "${INFISICAL_STUB_FAIL:-}" ] && { echo "error: could not fetch secrets" >&2; exit 1; }
 for a in "$@"; do
   case "$a" in
     --command=*) eval "${a#--command=}"; exit $? ;;
@@ -254,6 +255,46 @@ eq "writable image folder: nothing moved" "1" "$(grep -c '^env:APPDATA=<unset> '
 reset
 rc=$(unset CRON; HOME="$SBX/no-such-home" TMPDIR="$SBX/tmp" run_entry)
 eq "an unwritable HOME becomes TMPDIR" "1" "$(grep -c "HOME=$SBX/tmp$" "$SBX/calls")"
+
+echo "=== C7c: NOTIFICATION_LEVEL=failure sends only a failure ==="
+N='telegram://tok@telegram?chats=1'
+notifies() { grep -c '^notify:' "$SBX/calls"; }
+reset
+rc=$(unset CRON; NOTIFICATION_LEVEL=failure NOTIFICATION_URL=$N run_entry)
+eq "success: exit 0"                  "0" "$rc"
+eq "success: nothing sent"            "0" "$(notifies)"
+eq "success: the log says why"        "1" "$(grep -c 'Notifications enabled (failures only)' "$SBX/stdout")"
+reset
+rc=$(unset CRON; NOTIFICATION_LEVEL=failure NOTIFICATION_URL=$N BW_EXPORT_RC=1 run_entry)
+eq "failure: exit 1"                  "1" "$rc"
+eq "failure: exactly one message"     "1" "$(notifies)"
+eq "failure: it is the failure one"   "1" "$(grep -c 'log-line:run' "$SBX/last_notify")"
+reset
+rc=$(unset CRON; NOTIFICATION_LEVEL=failure NOTIFICATION_URL=$N BW_EXPORT_SUMMARY=1 BW_EXPORT_RC=1 run_entry)
+eq "failure with summary: headline"   "Bitwarden/Vaultwarden Export: Failed ❌" "$(head -n 1 "$SBX/last_notify")"
+reset
+rc=$(unset CRON; NOTIFICATION_LEVEL=FAILURE INFISICAL_TOKEN=tok INFISICAL_STUB_FAIL=1 NOTIFICATION_URL=$N run_entry)
+eq "Infisical failing: exit 1"        "1" "$rc"
+eq "Infisical failing: one message"   "1" "$(notifies)"
+eq "Infisical failing: it is sent"    "1" "$(grep -c '^notify:Bitwarden/Vaultwarden Export: Failed ❌ Infisical could not' "$SBX/calls")"
+reset
+rc=$(unset CRON; NOTIFICATION_LEVEL=all NOTIFICATION_URL=$N run_entry)
+eq "all: start and success"           "2" "$(notifies)"
+reset
+rc=$(unset CRON; NOTIFICATION_URL=$N run_entry)
+eq "unset: start and success, as before" "2" "$(notifies)"
+eq "unset: no warning"                "0" "$(grep -c 'NOTIFICATION_LEVEL' "$SBX/stdout")"
+reset
+rc=$(unset CRON; NOTIFICATION_LEVEL=errors NOTIFICATION_URL=$N run_entry)
+eq "a typo: everything is still sent" "2" "$(notifies)"
+eq "a typo: warned"                   "1" "$(grep -c 'NOTIFICATION_LEVEL must be all or failure' "$SBX/stdout")"
+reset
+rc=$(CRON="0 3 * * *" NOTIFICATION_LEVEL=failure NOTIFICATION_URL=$N BW_EXPORT_TAG=startup BW_EXPORT_FAIL_ON_TAG=scheduled run_entry)
+eq "CRON: only the failed run notifies" "1" "$(notifies)"
+eq "CRON: and it carries its error"   "1" "$(grep -c 'current-run-error-only' "$SBX/last_notify")"
+reset
+rc=$(unset CRON; NOTIFICATION_LEVEL=failure run_entry)
+eq "no URL: nothing, and no 'enabled' line" "0" "$(grep -c 'Notifications enabled' "$SBX/stdout")"
 
 echo "=== C8: flock prevents overlapping scheduled runs ==="
 reset
