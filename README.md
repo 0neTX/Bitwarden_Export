@@ -267,18 +267,20 @@ See [`docker-compose.multi.sample.yml`](docker-compose.multi.sample.yml).
 - **Everything else is shared by the whole run:** `CRON`, `TZ`, `FILE_LOG`, the notification, `PING_URL`, `PUID`/`PGID` and Infisical.
 - **One mode or the other.** With `BW_VAULTS`, setting `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` or `BW_URL_SERVER` without a prefix is an error and nothing is exported. A `VAULT_` variable that matches no vault, such as a typo, is reported as a warning.
 - **The vaults are exported one after another**, each with its own CLI session. A vault that fails does not stop the others, and the run then exits `1`.
-- **One notification and one ping** cover the whole run. The summary lists each vault:
+- **One notification and one ping** cover the whole run. The summary has a line per vault with its duration and size, and leaves out counts that are 0:
 
   ```text
-  ----- Summary -----
-  Vaults: 2 (1 succeeded, 1 failed)
-  Duration: 1m 2s
-  [personal] OK
-    Personal vault: exported (encrypted)
-    ...
-  [work] FAILED (exit 1)
-    ...
-  -------------------
+  Vaults: 1 of 2 failed, 1 exported, in 19s
+
+  ✅ personal (7s, 772KiB)
+     Personal vault: exported (encrypted)
+     Organizations: 1 exported
+     Attachments: none
+
+  ❌ work (failed with exit 1, 12s, 0B)
+     Personal vault: FAILED
+     Organizations: 2 failed
+     Attachments: none
   ```
 
 Without `BW_VAULTS` nothing changes: the single vault is configured as before and writes straight into `/var/data`.

@@ -63,8 +63,12 @@ check "each vault in its own CLI session folder" \
   "$(grep -q "APPDATA=\[$SBX/app/vaults/personal\]" "$SBX/calls" && grep -q "APPDATA=\[$SBX/app/vaults/work\]" "$SBX/calls"; echo $?)" "$(grep '^APPDATA' "$SBX/calls" | sort -u)"
 check "session folders are 700" "$([ "$(stat -c %a "$SBX/app/vaults/work")" = 700 ]; echo $?)" "$(stat -c %a "$SBX/app/vaults/work")"
 check "the global export password reached both" "$([ "$(grep -c $'\tglobal-exp$' "$SBX/pwlog")" = 2 ]; echo $?)" "$(cut -f1 "$SBX/pwlog")"
-check "summary counts both" "$(summary | grep -qx 'Vaults: 2 (2 succeeded, 0 failed)'; echo $?)" "$(summary)"
-check "summary has each vault's own lines" "$(summary | grep -qx '\[personal\] OK' && summary | grep -qx '  Personal vault: exported (encrypted)'; echo $?)" "$(summary)"
+check "summary counts both" "$(summary | grep -qE '^Vaults: all 2 exported in [0-9]+s$'; echo $?)" "$(summary)"
+check "a header per vault with duration and size" "$(summary | grep -qE '^✅ personal \([0-9]+s, [0-9.]+[KMG]?i?B\)$' && summary | grep -qE '^✅ work \('; echo $?)" "$(summary)"
+check "each vault's details under it" "$(summary | grep -qx '   Personal vault: exported (encrypted)'; echo $?)" "$(summary)"
+check "zero counts left out" "$(! summary | grep -qE '(, )?0 (skipped|failed)'; echo $?)" "$(summary)"
+check "no attachments read as none" "$(summary | grep -qx '   Attachments: none'; echo $?)" "$(summary)"
+check "a blank line between vaults" "$(summary | grep -c '^$' | grep -qx 2; echo $?)" "$(summary)"
 
 echo "=== V2: a vault that fails does not stop the next one, and the run fails ==="
 setup
@@ -72,7 +76,7 @@ rc=$(run BW_VAULTS=personal,work EXPORT_PASSWORD=x "${PERSONAL[@]/VAULT_PERSONAL
 check "exit 1" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"
 check "personal not exported" "$(! exported_in personal; echo $?)" "$(find "$SBX/out")"
 check "work still exported" "$(exported_in work; echo $?)" "$(find "$SBX/out")"
-check "summary says which" "$(summary | grep -q '^\[personal\] FAILED' && summary | grep -qx '\[work\] OK' && summary | grep -qx 'Vaults: 2 (1 succeeded, 1 failed)'; echo $?)" "$(summary)"
+check "summary says which" "$(summary | grep -qE '^❌ personal \(failed with exit 1' && summary | grep -qE '^✅ work \(' && summary | grep -qE '^Vaults: 1 of 2 failed, 1 exported, in [0-9]+s$'; echo $?)" "$(summary)"
 
 echo "=== V3: BW_VAULTS with single-vault credentials or server is refused before any export ==="
 for extra in BW_CLIENTID=id BW_PASSWORD_FILE=/run/secrets/pw BW_URL_SERVER=https://x.example.com; do

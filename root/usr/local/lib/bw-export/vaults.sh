@@ -32,6 +32,46 @@ OWN_PLAIN=(BW_URL_SERVER)
 INHERITED_SECRETS=(EXPORT_PASSWORD)
 INHERITED_PLAIN=(BW_ORGANIZATIONS_LIST ENCRYPT_ATTACHMENTS BACKUP_PERMISSIONS KEEP_LAST_BACKUPS KEEP_GFS)
 
+# One vault's part of the run summary, from its own summary block:
+#   ✅ work (12s, 1.5MiB)
+#      Personal vault: exported (encrypted)
+#      Organizations: 2 exported
+# Duration and size go on the header; counts that are 0 are left out.
+#   $1 icon  $2 folder  $3 status for the header, e.g. "failed with exit 1" (may be empty)
+#   stdin: the vault's summary block, without its markers
+vault_summary_lines() {
+    local icon=$1 folder=$2 status=$3 line key value duration="" size="" header
+    local -a body=()
+    while IFS= read -r line; do
+        [[ -z $line ]] && continue
+        key=${line%%: *}
+        value=${line#*: }
+        case $key in
+            Duration) duration=$value; continue ;;
+            "Backup size") size=$value; continue ;;
+            Organizations | Attachments)
+                # "2 exported, 0 skipped, 0 failed" -> "2 exported"
+                value=$(sed -E 's/(^|, )0 (exported|skipped|failed|saved)//g; s/^, //' <<<"$value")
+                [[ $value == "" || $value == \(* ]] && value="none${value:+ $value}"
+                line="$key: $value"
+                ;;
+        esac
+        body+=("$line")
+    done
+    local -a facts=()
+    [[ -n $status ]] && facts+=("$status")
+    [[ -n $duration ]] && facts+=("$duration")
+    [[ -n $size ]] && facts+=("$size")
+    header="$icon $folder"
+    if ((${#facts[@]} > 0)); then
+        header+=" ($(printf '%s, ' "${facts[@]}"))"
+        header=${header/%, )/)}
+    fi
+    printf '%s\n' "$header"
+    ((${#body[@]} > 0)) && printf '   %s\n' "${body[@]}"
+    return 0
+}
+
 fail_config() {
     echo -e "\n$(date '+%F %T') ${IYellow}ERROR: $1"
     shift
@@ -125,7 +165,7 @@ for i in "${!names[@]}"; do
     folder=${name,,}
     index=$((index + 1))
     if [[ $stop -ne 0 ]]; then
-        summary_lines+=("[$folder] NOT RUN (stopped)")
+        summary_lines+=("" "⏹️ $folder: not run, the container was stopped")
         failed=$((failed + 1))
         continue
     fi
@@ -155,7 +195,7 @@ for i in "${!names[@]}"; do
     done
     if [[ -n $setup_error ]]; then
         echo -e "\n$(date '+%F %T') ${IYellow}ERROR: Vault $folder: $setup_error."
-        summary_lines+=("[$folder] FAILED: $setup_error")
+        summary_lines+=("" "❌ $folder: $setup_error")
         failed=$((failed + 1))
         continue
     fi
@@ -209,16 +249,17 @@ for i in "${!names[@]}"; do
 
     if [[ $rc -eq 0 ]]; then
         succeeded=$((succeeded + 1))
-        summary_lines+=("[$folder] OK")
+        icon="✅"; status=""
     else
         failed=$((failed + 1))
-        summary_lines+=("[$folder] FAILED (exit $rc)")
+        icon="❌"; status="failed with exit $rc"
     fi
     vault_summary=$(sed -n '/^----- Summary -----$/,/^-------------------$/{/^----- Summary -----$/d;/^-------------------$/d;p}' "$log" | tail -n 20)
+    summary_lines+=("")
     if [[ -n $vault_summary ]]; then
-        while IFS= read -r line; do summary_lines+=("  $line"); done <<<"$vault_summary"
+        while IFS= read -r line; do summary_lines+=("$line"); done < <(vault_summary_lines "$icon" "$folder" "$status" <<<"$vault_summary")
     else
-        summary_lines+=("  (no summary: the export stopped early, see the log above)")
+        summary_lines+=("$icon $folder (${status:-stopped early})" "   No summary: the export stopped before writing one. See the log.")
     fi
     rm -f "$log"
 done
@@ -228,8 +269,11 @@ if ((duration >= 60)); then duration_text="$((duration / 60))m $((duration % 60)
 
 echo
 echo "----- Summary -----"
-echo "Vaults: ${#names[@]} ($succeeded succeeded, $failed failed)"
-echo "Duration: $duration_text"
+if [[ $failed -eq 0 ]]; then
+    echo "Vaults: all ${#names[@]} exported in $duration_text"
+else
+    echo "Vaults: $failed of ${#names[@]} failed, $succeeded exported, in $duration_text"
+fi
 printf '%s\n' "${summary_lines[@]}"
 echo "-------------------"
 
