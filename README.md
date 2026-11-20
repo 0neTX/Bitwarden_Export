@@ -33,6 +33,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 - [Scheduling](#scheduling)
 - [Retention](#retention)
 - [Encrypted attachments](#encrypted-attachments)
+- [Permissions of the backups](#permissions-of-the-backups)
 - [Off-site copy (3-2-1)](#off-site-copy-3-2-1)
 - [File ownership: PUID and PGID](#file-ownership-puid-and-pgid)
 - [Hardened setup](#hardened-setup)
@@ -219,6 +220,7 @@ Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `B
 | `ATTACHMENTS_PATH` | `/var/attachments/` | Where the attachments are written, same condition. |
 | `KEEP_LAST_BACKUPS` | keep everything | Keep only the N newest export folders, delete the rest. See [Retention](#retention). |
 | `KEEP_GFS` | — | Keep the newest export of each recent day, week, month and year, e.g. `7d:4w:6m`. Can be combined with `KEEP_LAST_BACKUPS`. See [Retention](#retention). |
+| `BACKUP_PERMISSIONS` | `default` | `private` makes each run's folders `700` and its files `600`, so only their owner can read them. See [Permissions of the backups](#permissions-of-the-backups). |
 | `ENCRYPT_ATTACHMENTS` | `false` | `true` packs the attachments into one archive encrypted with `EXPORT_PASSWORD`, which must then be set. See [Encrypted attachments](#encrypted-attachments). |
 | `FILE_LOG` | container-only log | Path of the run log, e.g. `/var/data/bw-export-logfile.log`. Point it inside a mounted volume or it is lost with the container. When `CRON` is enabled, appends across runs and rotates to `<FILE_LOG>.1` at 100 MiB. |
 | `CRON` | — (one-shot) | Standard 5-field cron expression (e.g. `0 3 * * *`) or macro (`@daily`, `@hourly`, etc., powered by `supercronic`). Validates the expression on startup (exiting `1` if invalid), runs an initial backup immediately, and keeps running for scheduled backups (skipping overlapping runs; if the initial backup fails, the scheduler keeps running). Recommended: set `restart: unless-stopped`. |
@@ -462,6 +464,30 @@ gpg -d attachments.tar.gz.gpg | tar -xz
 ```
 
 GnuPG asks for the password, and the folders are recreated in the current directory, one per vault item.
+
+## Permissions of the backups
+
+The Bitwarden CLI already writes what it saves with restricted modes: the exports and the attachments are `600` and each vault item's folder is `700`, so another user of the host cannot read them. What is left open is what the container itself creates, with its `umask` (normally `022`):
+
+- each run's `<DateTime>-bw-export` folder, in the data and attachments paths, is `755`. Anyone who can reach the volume can list what is inside: the names of your vault items and of their attachments, and the export files;
+- the encrypted attachments archive (`ENCRYPT_ATTACHMENTS`) is `644`. It is encrypted, but anyone can copy it.
+
+```yaml
+environment:
+  - BACKUP_PERMISSIONS=private
+```
+
+| | Default | `private` |
+|---|---|---|
+| Each run's folders (`<DateTime>-bw-export`) | `755` | `700` |
+| The encrypted attachments archive | `644` | `600` |
+| Exports and attachments written by the CLI, and each item's folder | `600` / `700` | `600` / `700` (the CLI's own modes) |
+
+- It applies from before the first file of the run exists, and is checked again at the end for filesystems that ignore the `umask` (shares with default ACLs). The folders you mount, `/var/data` and `/var/attachments`, are never changed.
+- **It takes access away from anyone who is not the owner.** The owner is `root` by default, the `PUID` user if you set one, or the `user:` of the [hardened setup](#hardened-setup). A script or a share that lists or copies the backups as another user stops working: give it the same user or leave this off.
+- It is not applied to the log (`FILE_LOG`), which keeps its own mode.
+- A filesystem without Unix modes, such as an NTFS share, cannot be restricted: the run still works and says so in a warning.
+- Backups written earlier are not changed. Change them once with `chmod -R go-rwx <folder>`.
 
 ## Off-site copy (3-2-1)
 
