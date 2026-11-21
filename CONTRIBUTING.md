@@ -53,6 +53,10 @@ saying why, as the existing scripts do.
 - The image version is declared in the `Dockerfile`. Bump it there.
 - Versions of the Bitwarden CLI and Shoutrrr are pinned on purpose. Changing one
   means saying what it was tested against.
+- Every downloaded binary is checked against a SHA-256 in the `Dockerfile`. A new
+  CLI version changes `BW_CLI_VERSION` and `BW_CLI_SHA256` together; the value is
+  the release asset's `digest` on GitHub:
+  `gh api repos/bitwarden/clients/releases/tags/cli-v<version> --jq '.assets[] | select(.name == "bw-bit-linux-<version>.zip") | .digest'`.
 - Comments explain *why* something is the way it is. What the code does is
   already in the code.
 
