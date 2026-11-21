@@ -458,7 +458,9 @@ NOTIFICATION_URL=gotify://$GOTIFY_HOST/$GOTIFY_TOKEN
 NOTIFICATION_URL=gotify://gotify.example.com/gtfya.AbCdEf0123456789AbCdEf0123456789AbCdEf01234
 ```
 
-If Gotify runs under a subpath, add it before the token (`gotify://example.com/gotify/$GOTIFY_TOKEN`). If it is served over plain HTTP, append `?disabletls=yes`.
+If Gotify runs under a subpath, add it before the token (`gotify://example.com/gotify/$GOTIFY_TOKEN`). If it is served over plain HTTP, append `?disabletls=yes`. If it uses a certificate your container does not trust, such as a self-signed one, append `?skiptlsverify=yes`.
+
+Only an **application** token works; a client token is rejected when the URL is read.
 
 Both token formats work: the legacy one from Gotify below 3.0.0 (15 characters starting with `A`) and the one issued by Gotify 3.0.0 and later (`gtfya.` prefix, around 50 characters). Support for the newer format is why this image builds Shoutrrr from the [nicholas-fedor fork](https://github.com/nicholas-fedor/shoutrrr): the original `containrrr` project stopped at v0.8.0, which rejects any token that is not exactly 15 characters starting with `A`.
 
@@ -706,6 +708,17 @@ Messages from the Bitwarden CLI itself appear indented under the error they expl
 | `Saved …` lines with item and file names are gone | From the release after 1.12, the log names no attachment: it says how many were saved, and names a failed one by its position and item ID. |
 
 ## Upgrade notes
+
+### Notifications: Shoutrrr 0.25
+
+The image now ships Shoutrrr 0.25 instead of 0.22, which fixes two high-severity vulnerabilities in the Go runtime it was built with. Telegram and the other URLs keep working as before, but a few services changed:
+
+- **Gotify:** `disabletls=yes` no longer skips certificate verification. For a self-signed certificate, add `skiptlsverify=yes`. And only application tokens are accepted, not client tokens.
+- **All services:** a message counts as delivered only on a 2xx answer, and a redirect to another host or from HTTPS to HTTP is refused instead of followed. A notification that used to fail silently may now be reported as failed; it never changes the backup's own exit code.
+- **Discord:** `@everyone`, `@here` and mentions written in the message no longer ping; list them in the URL's `mentions` key.
+- URLs are checked more strictly when read: an invalid port or a `..` in a path is rejected.
+
+If a notification stops arriving after the upgrade, the log says so (`WARNING: Sending the notification failed`). See the [Shoutrrr release notes](https://github.com/nicholas-fedor/shoutrrr/releases) for every service.
 
 ### Bitwarden CLI data folder
 

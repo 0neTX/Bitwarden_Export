@@ -131,9 +131,13 @@ jobs:
           fi
 
           # base.name is written out in full, so it can fall out of step with a
-          # bumped FROM. That is the same drift this whole change is about.
+          # bumped FROM. That is the same drift this whole change is about. The
+          # FROM is pinned by digest, which base.name leaves out on purpose:
+          # Dependabot bumps the digest in FROM only, so only name and tag are
+          # compared.
           base=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.base.name"}}' bw-export:ci)
           from=$(sed -n 's/^FROM \(.*\)$/\1/p' Dockerfile | head -1)
+          from=${from%%@*}
           echo "org.opencontainers.image.base.name = $base (FROM $from)"
           case "$base" in
             "$from"|*"/$from") ;;

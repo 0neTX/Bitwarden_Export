@@ -1,4 +1,7 @@
-FROM ubuntu:24.04
+# Pinned by digest, so the base cannot change between two builds of the same
+# commit. Dependabot proposes a new digest when Ubuntu republishes 24.04 with
+# security fixes, never a newer release (see .github/dependabot.yml).
+FROM ubuntu:24.04@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289
 
 # The image's own version. ARG so a release build can stamp it
 # (--build-arg IMAGE_VERSION=...), with the pinned value as the default, the
@@ -34,9 +37,10 @@ LABEL org.opencontainers.image.base.name="docker.io/library/ubuntu:24.04"
 # inherited: :latest reports ref.name=ubuntu to this day.
 LABEL org.opencontainers.image.ref.name="bw-export"
 
-# Not declared here on purpose: created, revision and base.digest are build-time
-# facts, and a hardcoded value for any of them would simply be false. They need
-# to be stamped by the workflow.
+# Not declared here on purpose: created and revision are build-time facts, and a
+# hardcoded value for either would simply be false; they need to be stamped by
+# the workflow. base.digest is left out too: the digest is pinned in the FROM
+# above, and a copy here would go stale every time Dependabot bumps that FROM.
 
 # Create a volume for storing vault exporting data
 VOLUME /var/data
@@ -58,13 +62,17 @@ ARG DEBIAN_FRONTEND=noninteractive
 # old Cloudsmith endpoint now answers 404, and in a pipeline curl's failure was
 # swallowed (no pipefail under /bin/sh), so bash ran an empty script, exited 0,
 # and the build died two lines later on a misleading "package not found".
+# apt-get upgrade applies the Ubuntu security fixes published since the base
+# image was built: about two thirds of the vulnerabilities a scan found in it
+# had one. --no-install-recommends and no wget keep out what nothing here uses.
 RUN apt-get update && \
-    apt-get install -y bash curl unzip jq wget procps ca-certificates tzdata gnupg && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends bash curl unzip jq procps ca-certificates tzdata gnupg && \
     curl -fsSL 'https://artifacts-cli.infisical.com/setup.deb.sh' \
         -o /tmp/infisical-setup.sh && \
     bash /tmp/infisical-setup.sh && \
     apt-get update && \
-    apt-get install -y infisical && \
+    apt-get install -y --no-install-recommends infisical && \
     echo "**** cleanup ****" && \
     apt-get clean && \
     rm -rf \
@@ -86,8 +94,8 @@ WORKDIR /app
 # every token issued by Gotify 3.0.0+ ("gtfya."/"gtfyc." prefix, ~50 chars).
 # The checksum is verified because this image handles a full vault; it comes
 # from the release's own checksums.txt and must be updated with the version.
-ARG SHOUTRRR_VERSION="0.22.0"
-ARG SHOUTRRR_SHA256="789c80a72013dea424d1f4ef896101164b240883ecef142f561dd6a118320dad"
+ARG SHOUTRRR_VERSION="0.25.0"
+ARG SHOUTRRR_SHA256="44028e84b65965d4819c9383b41f9246185e7b0f982480f7e7f3e7eafe0ea41b"
 ADD https://github.com/nicholas-fedor/shoutrrr/releases/download/v${SHOUTRRR_VERSION}/shoutrrr_linux_amd64_${SHOUTRRR_VERSION}.tar.gz /app/shoutrrr.tar.gz
 RUN echo "${SHOUTRRR_SHA256}  shoutrrr.tar.gz" | sha256sum -c - && \
     tar -xzf shoutrrr.tar.gz shoutrrr LICENSE.md && \
