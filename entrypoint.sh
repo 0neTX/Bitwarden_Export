@@ -73,7 +73,7 @@ run_header() {
         if [[ "$(notify_level)" == failure ]]; then notifications="failures only"; else notifications="on"; fi
     fi
     [[ -n "$(resolve_secret PING_URL 2>/dev/null)" ]] && ping="on"
-    [[ -n "${INFISICAL_TOKEN:-}" ]] && infisical="on"
+    secret_is_set INFISICAL_TOKEN && infisical="on"
     [[ -n "${BW_VAULTS:-}" ]] && vaults="several (BW_VAULTS)"
     log_info "Vaults: $vaults; notifications: $notifications; monitoring ping: $ping; Infisical: $infisical; log file: $([[ -n "${FILE_LOG:-}" ]] && echo on || echo off)"
 }
@@ -152,7 +152,20 @@ $tail_lines"
     fi
     logfile="${LOGFILE_DEFAULT:-/app/bw-export-logfile.log}"
 
-    if [[ -n "${INFISICAL_TOKEN}" ]]; then
+    # INFISICAL_TOKEN may come as INFISICAL_TOKEN_FILE, like the other secrets,
+    # so that "docker inspect" does not show it. The infisical CLI only reads
+    # the variable, so the value is put there, in this process's environment.
+    if secret_is_set INFISICAL_TOKEN; then
+        INFISICAL_TOKEN=$(resolve_secret INFISICAL_TOKEN)
+        unset INFISICAL_TOKEN_FILE
+        if [[ -z "$INFISICAL_TOKEN" ]]; then
+            log_error "INFISICAL_TOKEN is set, but no token could be read from it."
+            exit 1
+        fi
+        export INFISICAL_TOKEN
+    fi
+
+    if [[ -n "${INFISICAL_TOKEN:-}" ]]; then
         # An array, so that no INFISICAL_PATH means no argument at all. A quoted
         # empty string reaches Infisical as an argument, which it rejects, so the
         # check below failed whenever INFISICAL_PATH was not set.
@@ -184,10 +197,13 @@ $tail_lines"
 $(tail -n 5 <<<"$infisical_output")"
             exit 1
         fi
+        # Without --log-level=error the infisical CLI adds its own "Injecting N
+        # secrets" line, with colour codes, to every run's log (since 0.45,
+        # --silent alone no longer hides it). Errors still show.
         if [[ -n "$infisicalpath" ]]; then
-            printf -v command 'infisical run %q --command=%q' "$infisicalpath" "$command"
+            printf -v command 'infisical run --silent --log-level=error %q --command=%q' "$infisicalpath" "$command"
         else
-            printf -v command 'infisical run --command=%q' "$command"
+            printf -v command 'infisical run --silent --log-level=error --command=%q' "$command"
         fi
     fi
 

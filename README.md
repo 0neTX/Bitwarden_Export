@@ -231,7 +231,7 @@ Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `B
 | `NOTIFICATION_URL` | — | Shoutrrr URL for the start/success/failure messages. See [Notifications](#notifications). |
 | `NOTIFICATION_LEVEL` | `all` | `failure` sends a message only when a run fails. See [Notifications](#notifications). |
 | `PING_URL` | — | Watchdog endpoint pinged at start and on completion. See [Monitoring](#monitoring). |
-| `INFISICAL_TOKEN` | — | Infisical service token, to read the credentials from Infisical. See [Option B](#option-b-infisical). |
+| `INFISICAL_TOKEN` | — | Infisical service token, to read the credentials from Infisical. Can also be given as `INFISICAL_TOKEN_FILE`, the path of a file holding it. See [Option B](#option-b-infisical). |
 | `INFISICAL_PATH` | token's own path | *Secrets Path* of that service token. |
 | `PUID` / `PGID` | `0` (root) | Host user and group the exported files should belong to. See [PUID and PGID](#file-ownership-puid-and-pgid). |
 

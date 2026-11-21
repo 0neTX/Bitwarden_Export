@@ -18,6 +18,8 @@ services:
     environment:
       # Credentials (required): the service token reads all of them.
       - INFISICAL_TOKEN=<INFISICAL SERVICE TOKEN, st.…>
+      # Or keep it out of "docker inspect" with a Docker secret:
+      # - INFISICAL_TOKEN_FILE=/run/secrets/infisicaltoken
       # - INFISICAL_PATH=/
       # Server: leave commented out for bitwarden.com.
       # - BW_URL_SERVER=https://vault.example.com

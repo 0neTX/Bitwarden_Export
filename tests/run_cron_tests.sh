@@ -94,6 +94,7 @@ cat > "$SBX/infisical" <<'STUB'
 #!/usr/bin/env bash
 d="${CRON_TEST_DIR:?}"
 echo "infisical:$*" >> "$d/calls"
+echo "infisical-token:${INFISICAL_TOKEN:-<none>}" >> "$d/calls"
 [ -n "${INFISICAL_STUB_FAIL:-}" ] && { echo "error: could not fetch secrets" >&2; exit 1; }
 for a in "$@"; do
   case "$a" in
@@ -335,6 +336,20 @@ eq "ping 0 sent once"          "1" "$(grep -c '^ping:https://hc.example/0$' "$SB
 eq "ping 1 sent once"          "1" "$(grep -c '^ping:https://hc.example/1$' "$SBX/calls")"
 eq "notify has current error"  "1" "$(grep -c 'current-run-error-only' "$SBX/last_notify")"
 eq "notify omits startup line" "0" "$(grep -c 'log-line:startup' "$SBX/last_notify")"
+
+echo "=== C11b: INFISICAL_TOKEN_FILE gives the token to infisical, and a missing file stops ==="
+reset
+printf 'st.token-from-file\n' > "$SBX/inf-token"
+rc=$(unset CRON INFISICAL_TOKEN; INFISICAL_TOKEN_FILE="$SBX/inf-token" run_entry)
+eq "exit 0"                          "0" "$rc"
+eq "infisical ran"                   "1" "$([ "$(grep -c '^infisical:' "$SBX/calls")" -ge 1 ] && echo 1 || echo 0)"
+eq "infisical got the file's token"  "1" "$([ "$(grep -c '^infisical-token:st.token-from-file$' "$SBX/calls")" -ge 1 ] && echo 1 || echo 0)"
+eq "the token never in the log"     "0" "$(grep -c 'token-from-file' "$SBX/stdout")"
+reset
+rc=$(unset CRON INFISICAL_TOKEN; INFISICAL_TOKEN_FILE="$SBX/no-such-token" run_entry)
+eq "missing file: exit 1"           "1" "$rc"
+eq "missing file: says why"         "1" "$(grep -c 'ERROR: INFISICAL_TOKEN is set, but no token could be read from it' "$SBX/stdout")"
+eq "missing file: no export"        "0" "$(grep -c '^bw_export:' "$SBX/calls")"
 
 echo "=== C12: INFISICAL_TOKEN works in both startup and scheduled CRON runs ==="
 reset
