@@ -1,8 +1,10 @@
+<div align="center">
+
+<img src="docs/assets/logo.svg" width="120" alt="">
+
 # Bitwarden_Export
 
-<img src="https://raw.githubusercontent.com/dani-garcia/vaultwarden/main/resources/vaultwarden-icon.svg" width="180">
-
-**[Bitwarden_Export](https://github.com/0neTX/Bitwarden_Export)**: Docker to backup your Bitwarden vault contents
+**Never lose your passwords.**
 
 [![CI](https://github.com/0neTX/Bitwarden_Export/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/ci.yml)
 [![Release](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml/badge.svg)](https://github.com/0neTX/Bitwarden_Export/actions/workflows/docker-publishhub-latest.yml)
@@ -11,250 +13,473 @@
 [![Image size](https://img.shields.io/docker/image-size/0netx/bw-export/latest?logo=docker&label=size)](https://hub.docker.com/r/0netx/bw-export/tags)
 [![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
 
+</div>
+
+---
+
+Your vault holds every password you have. Bitwarden_Export keeps an encrypted copy of it on your own disk — passwords, organizations and attachments — day after day, without you having to remember. Set it up once, and it tells you if a backup ever fails.
+
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Examples](#examples)
+- [What it produces](#what-it-produces)
+- [Configuration](#configuration)
+- [Several vaults](#several-vaults)
+- [Handling secrets](#handling-secrets)
+- [Notifications](#notifications)
+- [Monitoring](#monitoring)
+- [Scheduling](#scheduling)
+- [Retention](#retention)
+- [Encrypted attachments](#encrypted-attachments)
+- [Permissions of the backups](#permissions-of-the-backups)
+- [Off-site copy (3-2-1)](#off-site-copy-3-2-1)
+- [File ownership: PUID and PGID](#file-ownership-puid-and-pgid)
+- [Hardened setup](#hardened-setup)
+- [Platform notes](#platform-notes)
+- [Image tags](#image-tags)
+- [Troubleshooting](#troubleshooting)
+- [Upgrade notes](#upgrade-notes)
+- [Development](#development)
+- [Contributing](#contributing)
+- [Security](#security)
+- [Credits](#credits)
+- [Disclaimer](#disclaimer)
+- [License](#license)
+
 ## Features
 
-This simple bash docker image uses the Bitwarden CLI to perform three backup tasks:
+- Exports your **personal vault** to JSON, plain or password-encrypted.
+- Exports your **organization vaults** (every one you own or administer, or the ones you list).
+- Exports **several accounts in one container**, even on different servers, each into a folder of its own ([details](#several-vaults)).
+- Downloads **file attachments**, one subfolder per vault item, or packs them into **one encrypted archive** with `ENCRYPT_ATTACHMENTS` ([details](#encrypted-attachments)).
+- Keeps **passwords off the command line**, so other users on the host cannot read them with `ps` ([details](#passwords-stay-off-the-command-line)).
+- Reads its credentials from **Docker secrets** or from **[Infisical](#option-b-infisical)** instead of the compose file.
+- Sends the outcome to any platform supported by **[Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/)** (Telegram, Gotify, and about thirty more), with a **summary** of what was backed up.
+- Pings a **watchdog** (healthchecks, uptime-kuma, any dead man's switch) at start and on completion.
+- **Prunes old exports** automatically: the last N with `KEEP_LAST_BACKUPS`, or daily/weekly/monthly with `KEEP_GFS` ([details](#retention)).
+- Pairs with an **rclone sidecar** for an off-site copy ([details](#off-site-copy-3-2-1)).
+- Runs **without root**, with a read-only filesystem and no capabilities, for a container that stays up with `CRON` ([details](#hardened-setup)).
+- Exits with the export's own status code, so `restart: on-failure`, cron and orchestrators see a failed backup as a failure.
 
-- [x] Export personal vault
-- [x] Export organization vault (if applicable)
-- [x] Export file attachments (if applicable)
+## Requirements
 
-### New Features
+- [Docker](https://docker.com) or Podman. Linux, macOS and Windows all work; adapt the compose file to your host.
+- **Personal API key** for CLI authentication: [how to get it](https://bitwarden.com/help/personal-api-key/).
+- If you self-host, a server reachable over **HTTPS**. The Bitwarden CLI refuses plain-HTTP URLs.
+- **Vaultwarden 1.37.4 or later.** The bundled Bitwarden CLI (2026.11.0) calls an endpoint older Vaultwarden releases do not have, and the export then fails with `Failed to unlock vault with BW_PASSWORD` even though the password is right ([vaultwarden#7693](https://github.com/dani-garcia/vaultwarden/pull/7693)). bitwarden.com is not affected.
 
-- [x] Securize authentication tokens with [Infisical Vault](#safety-infisical)
-- [x] Receive notification in any platform with [Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/)
-- [x] Passwords never appear on a command line, so other users on the host cannot read them with `ps` ([details](#safety-command-line))
+## Quick start
 
-The docker image provides the choice of creating unencrypted export files or password-encrypted export files. Attachments are not encrypted.
+### Docker Compose (recommended)
 
-## Compatibility
+Copy [`docker-compose.yml`](docker-compose.yml) from this repository, fill in the three credentials and the export password, and run it:
 
-This docker image is compatible with Linux, MacOs or Windows. Please adapt docker-compose file to each OS.
+```yaml
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - BW_PASSWORD=<BITWARDEN PASSWORD>
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
+```
 
-### Requirements
-
-This docker image requires the following:
-
-- [Docker](https://docker.com) (Obviously)
-- Personal API Keys for CLI Authentication <a href="https://bitwarden.com/help/personal-api-key/" target="_blank">https://bitwarden.com/help/personal-api-key/</a>
-- A self-hosted server reachable over **HTTPS**: the Bitwarden CLI refuses plain-HTTP URLs.
-- **Vaultwarden 1.37.4 or later.** The bundled Bitwarden CLI (2026.10.0) calls an endpoint that older Vaultwarden releases do not have, and the export then fails with `Failed to unlock vault with BW_PASSWORD` even though the password is right ([vaultwarden#7693](https://github.com/dani-garcia/vaultwarden/pull/7693)). bitwarden.com is not affected.
-
-## How to Use the docker image
-
-Before using the image for the first time, you must edit the variables and volumes to provide authentication credentials and folder locations to save export files and attachments, as well as your organisation ID (if you want to export your organisation's vault; otherwise, leave it blank).
-
-The docker image will prompt you for your password each time so that you don't have to save that within the docker image.
-
-### Execution:
-From a terminal window, simply type: `bash bw_export.sh` and follow the prompts.
-
-## Outputs
-
-The following are created by the docker image:
-* JSON file containing your exported personal vault contents (password-encryption is recommended)
-* JSON file containing your exported organization vault contents (optional)
-* folder containing copies of your file attachments, labelled by subfolder names that match the name given to each vault item
-
-## How to run the container
-
-### Run container in any plattorm with docker command line:
-
-If you prefer to run it manually or just once, run the following command:
+The file lists every other option, commented out.
 
 ```bash
-docker run --name bw-export -v ./export/data:/var/data -v ./export/attachments:/var/attachments -e "BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>" -e "BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>" -e "BW_PASSWORD=<BITWARDEN PASSWORD>" 0netx/bw-export:latest
+docker compose up
 ```
 
-### Run container in any plattorm with docker compose:
+The container performs one export and exits with the export's status code.
 
-* To run this container you must copy the `docker-compose.yml` from the repository.
+### Docker Compose with built-in CRON
 
-    ``` yaml
-    services:
-    bw-export:
-        container_name: bw-export
-        image: 0netx/bw-export:latest
-        volumes:
-        - ./export:/var
-        environment:
-        - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
-        - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
-        - BW_PASSWORD=<BITWARDEN PASSWORD>
-        # Optional: Own Vaultwarden/Bitarden selfhosted server
-        #- BW_URL_SERVER=<YOUR VAULTWARDER URL SERVER>
-        - OUTPUT_PATH=<Output path i.e. /var/data/ >
-        - ATTACHMENTS_PATH=<attachment path i.e. /var/attachments/ >
-        - EXPORT_PASSWORD=<Export password. Export will be encrypted with this password>
-        - BW_ORGANIZATIONS_LIST=<Organization list id, comma separated>
-        # Optional: Map the container's internal user to a user on the host machine
-        # - PUID=1000
-        # - PGID=1000
-        # Optional: Execution logging file. Please check output path is mapping inside a volume
-        # - FILE_LOG=/var/data/bw-export-logfile.log
-        # Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted.
-        # - KEEP_LAST_BACKUPS=5
-        
-    ```
+If you want the container to stay running and run backups on a schedule (for example daily at 03:00), use [`docker-compose.cron.sample.yml`](docker-compose.cron.sample.yml):
 
-* Configure each required variable and volumes.
-* Run the compose with `docker compose up`
-
-### Enviroment Variables
-
-Vaultwarden Export can be configured using the following environment variables. 
-
-You must report the following variables so that the container can authenticate itself in your vault. The API Keys for authentication can be obtained from Personal API Keys for CLI Authentication <a href="https://bitwarden.com/help/personal-api-key/" target="_blank">https://bitwarden.com/help/personal-api-key/</a>
-
-| Variable                          | Description                                                                              |
-|-----------------------------------|------------------------------------------------------------------------------------------|
-| `BW_CLIENTID`                     | It's `client_id` variable from your account      |
-| `BW_CLIENTSECRET`                 | It's `client_secret` variable from your account                      |
-| `BW_PASSWORD`                     | Your Bitwarden/Vaultwarden password.                                                   |
-| `EXPORT_PASSWORD`                 | Encryption password you have chosen for exporting then vault. if you choose to use password-encryption to store your export files (recommended) be sure that you use a strong and memorable password! (don't just store it inside Bitwarden, because if you get locked out of your account you won't be able to restore your exports) |
-
-**OPTIONALS VARIABLES:**
-
-| Variable                          | Description                                                                              |
-|-----------------------------------|------------------------------------------------------------------------------------------|
-| `BW_ORGANIZATIONS_LIST`           | If you want to make a backup of your organizations, set one or more organizations separated by comma. |
-| `NOTIFICATION_URL`                | Shoutrrr notification url [Service overview](https://shoutrrr.nickfedor.com/latest/services/overview/) |
-| `KEEP_LAST_BACKUPS`               | Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted. |
-| `FILE_LOG`                        | Optional: Execution logging file. Please check output path is mapping inside a volume    |
-| `PING_URL`                        | Optional: monitoring endpoint pinged when the export starts and when it finishes, carrying the outcome. For healthchecks, uptime-kuma or any dead man's switch. See [Monitoring](#monitoring-healthchecks-uptime-kuma) |
-
-### Safety
-
-This container is based on an automation of the official [Bitwarden CLI client](https://bitwarden.com/help/cli/). **This script does not save, trace or store any information.** The session is closed after the backup has been performed.
-
-#### Passwords stay off the command line {#safety-command-line}
-
-Every user on the host can read the command line of any process with `ps`,
-including the processes inside a container, with Docker as with Podman. So the
-script never passes a password as an argument to the Bitwarden CLI:
-
-- the master password (`BW_PASSWORD`) reaches `bw unlock` through an environment
-  variable (`--passwordenv`), which only the process owner and root can read;
-- the export password (`EXPORT_PASSWORD`) reaches `bw export` through stdin, by
-  answering the CLI's own password prompt. The prompt is kept out of the log,
-  since it is redrawn once per character and would give away the length.
-
-Nothing has to be configured for this: both variables keep accepting either the
-value or the path of a file holding it.
-
-If you wish you can configure each variable using [docker secrets](https://docs.docker.com/compose/use-secrets/) as in the example [docker-compose.secrets.sample.yml](https://github.com/0neTX/Bitwarden_Export/blob/main/docker-compose.secrets.sample.yml)
-
-### Safety. Option A Define docker secret files
-
-``` bash
-mkdir ./.secrets
-echo BW_CLIENTID > ./.secrets/.bwclientid
-echo BW_CLIENTSECRET  > ./.secrets/.bwsecret
-echo BW_PASSWORD  > ./.secrets/.bwpassword
+```yaml
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    restart: unless-stopped
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - BW_PASSWORD=<BITWARDEN PASSWORD>
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
+      - CRON=0 3 * * *
+      - TZ=Europe/Madrid
+      - KEEP_LAST_BACKUPS=5
+      - FILE_LOG=/var/data/bw-export-logfile.log
 ```
 
-- Configure `docker-compose.secrets.sample.yml` with your variables and volumes
-- Run it and enjoy it.
+```bash
+docker compose -f docker-compose.cron.sample.yml up -d
+```
 
-### Safety. Option B Use infisical {#safety-infisical}
+The container validates the `CRON` expression, runs an initial backup immediately on startup, and keeps running to execute scheduled backups.
 
-- Sign up in [Infisical free account](https://app.infisical.com/signup)
-- Create a project and create the variables bellow:
+### Plain `docker run`
 
-  - `BW_CLIENTID`=*CLIENT ID FROM BITWARDEN API*
-  - `BW_CLIENTSECRET`=*CLIENT SECRET FROM BITWARDEN API*
-  - `BW_PASSWORD`=*BITWARDEN PASSWORD*
-  - `EXPORT_PASSWORD`=*EXPORT PASSWORD. Optional*
+```bash
+docker run --name bw-export \
+  -v ./export/data:/var/data \
+  -v ./export/attachments:/var/attachments \
+  -e BW_CLIENTID=<CLIENT ID FROM BITWARDEN API> \
+  -e BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API> \
+  -e BW_PASSWORD=<BITWARDEN PASSWORD> \
+  -e EXPORT_PASSWORD=<EXPORT PASSWORD> \
+  0netx/bw-export:latest
+```
 
-![secrets value sample](docs/assets/infisical1.png)
-**This is an example from Infisical Website*
+### Without Docker
 
-- Create a [Service Token](https://infisical.com/docs/internals/service-tokens) in Project -- Access Control -- Service Tokens. Customize Service Token Name and Secrets Path according to your requerimients.
+The script can also be run directly from a terminal, which prompts for what it needs:
 
-![service token](docs/assets/infisical2.png)
- 
-- Copy created service token
+```bash
+bash bw_export.sh
+```
 
-![service token](docs/assets/infisical3.png)
+## Examples
 
-- Edit Docker compose and add the variables `INFISICAL_TOKEN` with previous generated token and `INFISICAL_PATH` with *Secrets Path* value
+Each example is a complete compose file. They go from the simplest to the most complete; start with the first and move on when you need what the next one adds.
 
-> A service token carries its own environment and *Secrets Path*, and Infisical always applies them: `INFISICAL_PATH` cannot point a service token anywhere else, and a wrong value is not reported as an error. If the export runs with the wrong secrets, check the token's scope in Infisical, not `INFISICAL_PATH`.
+| File | What it adds | Start with |
+|---|---|---|
+| [`docker-compose.yml`](docker-compose.yml) | One backup, then exit. Lists every option, commented out. | `docker compose up` |
+| [`docker-compose.cron.sample.yml`](docker-compose.cron.sample.yml) | Backups on a schedule, with retention. See [Scheduling](#scheduling). | `docker compose -f docker-compose.cron.sample.yml up -d` |
+| [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml) | Credentials as Docker secrets. See [Option A](#option-a-docker-secrets). | `docker compose -f docker-compose.secrets.sample.yml up` |
+| [`docker-compose.multi.sample.yml`](docker-compose.multi.sample.yml) | Several accounts, on bitwarden.com or self-hosted servers, each into a subfolder. See [Several vaults](#several-vaults). | `docker compose -f docker-compose.multi.sample.yml up` |
+| [`docker-compose.infisical.sample.yml`](docker-compose.infisical.sample.yml) | Credentials from Infisical. See [Option B](#option-b-infisical). | `docker compose -f docker-compose.infisical.sample.yml up` |
+| [`docker-compose.hardened.sample.yml`](docker-compose.hardened.sample.yml) | Schedule and secrets, without root, capabilities or a writable image. See [Hardened setup](#hardened-setup). | `docker compose -f docker-compose.hardened.sample.yml up -d` |
+| [`docker-compose.offsite.sample.yml`](docker-compose.offsite.sample.yml) | A second copy off the host with an rclone sidecar. See [Off-site copy](#off-site-copy-3-2-1). | `docker compose -f docker-compose.offsite.sample.yml up -d` |
+| [`compose.podman.yml`](compose.podman.yml) | Not standalone: an override for rootless Podman, added to any of the above. See [Rootless Podman](#rootless-podman). | `podman compose -f docker-compose.yml -f compose.podman.yml up` |
+
+All of them write the exports to `./export/data` and the attachments to `./export/attachments`, next to the compose file, and leave `BW_URL_SERVER` commented out, which means bitwarden.com.
+
+## What it produces
+
+Every run writes a dated folder, `<DateTime>-bw-export`, into the output path:
+
+- a JSON file with your **personal vault** (password-encrypted when `EXPORT_PASSWORD` is set — recommended),
+- a JSON file per **organization vault**, if you export any,
+- a folder with your **attachments**, one subfolder per vault item, or a single `attachments.tar.gz.gpg` when `ENCRYPT_ATTACHMENTS` is on.
+  Each subfolder is named after its item. Items that share a name get their short ID appended, `Passport (1a2b3c4d)`, and so do attachments that share a name within an item, `scan (9f8e7d6c).pdf`, so that none overwrites another. Names are compared ignoring case, as on Windows and macOS.
+
+The log ends with a summary of the run, which is also what the [notification](#notifications) carries:
+
+```text
+----- Summary -----
+Duration: 41s
+Personal vault: exported (encrypted)
+Organizations: 1 exported, 1 skipped, 0 failed
+Attachments: 14 saved, 0 failed (encrypted archive)
+Backup size: 3.2MiB
+Old backups deleted: 1
+-------------------
+```
+
+The Bitwarden CLI cannot export items in your **Trash** or your **password history**, so neither is included.
+
+## Configuration
+
+Everything is set through environment variables. Only the three credentials are required; every other variable has a default that works, and the tables below give it.
+
+Any variable that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`, `EXPORT_PASSWORD`, `NOTIFICATION_URL`, `PING_URL`, `INFISICAL_TOKEN`) can be given instead as `NAME_FILE`, the path of a file holding it, so that `docker inspect` does not show it. Set only one of the two: for the credentials, both set stops the run. See [Option A: Docker secrets](#option-a-docker-secrets).
+
+### Required
+
+| Variable | Description |
+|---|---|
+| `BW_CLIENTID` | The `client_id` of your [personal API key](https://bitwarden.com/help/personal-api-key/). |
+| `BW_CLIENTSECRET` | The `client_secret` of that API key. |
+| `BW_PASSWORD` | Your Bitwarden/Vaultwarden master password. |
+
+With [several vaults](#several-vaults), these go in each vault's own variables (`VAULT_<NAME>_BW_CLIENTID`, …) instead.
+
+### Recommended
+
+| Variable | Description |
+|---|---|
+| `EXPORT_PASSWORD` | Encrypts the export files. Use a strong password you can remember, and **do not store it only inside Bitwarden**: if you get locked out of your account you could not decrypt your own backups. Left unset, the exports are written in plain text. |
+| `PUID` / `PGID` | The host user and group the export runs as and the files belong to. Without them the export runs as root. See [PUID and PGID](#file-ownership-puid-and-pgid). |
+
+### Optional
+
+#### Server and what is exported
+
+| Variable | Default | Description |
+|---|---|---|
+| `BW_URL_SERVER` | bitwarden.com | URL of your self-hosted Vaultwarden/Bitwarden server. Must be HTTPS. |
+| `BW_ORGANIZATIONS_LIST` | every organization you own or administer | Comma-separated organization IDs to export, or `none` to export no organization. |
+| `BW_VAULTS` | — (one vault) | Comma-separated names of several vaults to export in one run, each configured with `VAULT_<NAME>_…` variables. See [Several vaults](#several-vaults). |
+
+#### Where backups go and how long they are kept
+
+| Variable | Default | Description |
+|---|---|---|
+| `OUTPUT_PATH` | `/var/data/` | Where the vault exports are written. The path must exist in the container, normally as a mounted volume. |
+| `ATTACHMENTS_PATH` | `/var/attachments/` | Where the attachments are written, same condition. |
+| `KEEP_LAST_BACKUPS` | keep everything | Keep only the N newest export folders, delete the rest. See [Retention](#retention). |
+| `KEEP_GFS` | — | Keep the newest export of each recent day, week, month and year, e.g. `7d:4w:6m`. Can be combined with `KEEP_LAST_BACKUPS`. See [Retention](#retention). |
+
+#### Encryption and permissions
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENCRYPT_ATTACHMENTS` | `false` | `true` packs the attachments into one archive encrypted with `EXPORT_PASSWORD`, which must then be set. See [Encrypted attachments](#encrypted-attachments). |
+| `BACKUP_PERMISSIONS` | `default` | `private` makes each run's folders `700` and its files `600`, so only their owner can read them. See [Permissions of the backups](#permissions-of-the-backups). |
+
+#### Schedule and log
+
+| Variable | Default | Description |
+|---|---|---|
+| `CRON` | — (one backup, then exit) | When to back up: a standard 5-field expression such as `0 3 * * *` (supercronic's extended 6- and 7-field forms work too) or a macro: `@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly`, `@annually`. Anything else stops the container at start. The container then stays up, backs up once at start and at every scheduled time, and skips a run while the previous one is still going. Set `restart: unless-stopped`. See [Scheduling](#scheduling). |
+| `TZ` | `UTC` | Timezone for the log and for `CRON`, e.g. `Europe/Madrid`. |
+| `FILE_LOG` | inside the container only | Path of a log file, e.g. `/var/data/bw-export-logfile.log`. Put it in a mounted volume or it is lost with the container. Each run overwrites it; with `CRON`, runs are appended instead and the file is rotated to `<FILE_LOG>.1` once it reaches `FILE_LOG_MAX_BYTES`. |
+| `FILE_LOG_MAX_BYTES` | `104857600` (100 MiB) | Size at which the `CRON` log is rotated. |
+
+#### Notifications and monitoring
+
+| Variable | Default | Description |
+|---|---|---|
+| `NOTIFICATION_URL` | — | [Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/) URL for the start, success and failure messages. See [Notifications](#notifications). |
+| `NOTIFICATION_LEVEL` | `all` | `failure` sends a message only when a run fails. |
+| `PING_URL` | — | Watchdog endpoint (healthchecks, uptime-kuma, …) pinged at start and on completion. See [Monitoring](#monitoring). |
+
+#### Secrets from Infisical
+
+| Variable | Default | Description |
+|---|---|---|
+| `INFISICAL_TOKEN` | — | Infisical service token: the credentials and `EXPORT_PASSWORD` are then read from Infisical. See [Option B](#option-b-infisical). |
+| `INFISICAL_PATH` | the token's own path | *Secrets Path* to read. A service token always applies its own scope, so this rarely needs setting. |
+
+#### Advanced
+
+Rarely needed; the defaults suit almost every setup.
+
+| Variable | Default | Description |
+|---|---|---|
+| `NODE_EXTRA_CA_CERTS` | — | Path of a PEM file with an extra certificate authority to trust, for a self-hosted server whose certificate is signed by your own CA. Mount the file and point this at it, e.g. `/certs/ca.crt`. |
+| `BITWARDENCLI_APPDATA_DIR` | `/app/data`, or `$TMPDIR/bitwarden-cli` without root | Where the Bitwarden CLI keeps its session while a run is logged in. With `BW_VAULTS`, each vault uses `<this>/vaults/<name>`. |
+| `TMPDIR` | `/tmp` | Temporary folder. Without root it also holds the CLI's session and the default log, and with `ENCRYPT_ATTACHMENTS` one run's attachments before they are encrypted, so it must fit them. |
+
+Other variables you may find in the scripts (`ADDUSER_BIN`, `APP_DIR`, `LOG_LIB` and the other `*_LIB`, `SHOUTRRR_BIN`, …) exist so the [test suites](tests/README.md) can run the scripts outside the image. They are not settings and may change without notice.
+
+### Volumes
+
+| Path | Contents |
+|---|---|
+| `/var/data` | Vault exports. |
+| `/var/attachments` | Attachments. |
+
+## Several vaults
+
+One container can back up several accounts, on bitwarden.com or on different self-hosted servers. List them in `BW_VAULTS` and give each one its settings with its name in capitals after `VAULT_`:
+
+```yaml
+environment:
+  - BW_VAULTS=personal,work
+  - VAULT_PERSONAL_BW_CLIENTID=<client id>
+  - VAULT_PERSONAL_BW_CLIENTSECRET=<client secret>
+  - VAULT_PERSONAL_BW_PASSWORD=<master password>
+  - VAULT_WORK_BW_URL_SERVER=https://vault.example.com
+  - VAULT_WORK_BW_CLIENTID=<client id>
+  - VAULT_WORK_BW_CLIENTSECRET=<client secret>
+  - VAULT_WORK_BW_PASSWORD_FILE=/run/secrets/work_password
+  - EXPORT_PASSWORD=<export password>     # for every vault without its own
+```
+
+See [`docker-compose.multi.sample.yml`](docker-compose.multi.sample.yml).
+
+- **Names** may use letters, digits and `_`, because they become part of variable names. Each vault writes into a subfolder named after it in lower case: `/var/data/personal/<DateTime>-bw-export` and `/var/attachments/personal/…`.
+- **Credentials and server belong to each vault and are never shared:** `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` (or their `_FILE` forms) and `BW_URL_SERVER`. Without a server, a vault uses bitwarden.com.
+- **These options apply to every vault unless a vault sets its own:** `EXPORT_PASSWORD` (or `EXPORT_PASSWORD_FILE`), `BW_ORGANIZATIONS_LIST`, `ENCRYPT_ATTACHMENTS`, `BACKUP_PERMISSIONS`, `KEEP_LAST_BACKUPS` and `KEEP_GFS`. An empty value turns an option off for that vault, e.g. `VAULT_WORK_KEEP_GFS=`.
+- **Everything else is shared by the whole run:** `CRON`, `TZ`, `FILE_LOG`, the notification, `PING_URL`, `PUID`/`PGID` and Infisical.
+- **One mode or the other.** With `BW_VAULTS`, setting `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` or `BW_URL_SERVER` without a prefix is an error and nothing is exported. A `VAULT_` variable that matches no vault, such as a typo, is reported as a warning.
+- **The vaults are exported one after another**, each with its own CLI session. A vault that fails does not stop the others, and the run then exits `1`.
+- **One notification and one ping** cover the whole run. The summary has a line per vault with its duration and size, and leaves out counts that are 0:
+
+  ```text
+  Vaults: 1 of 2 failed, 1 exported, in 19s
+
+  ✅ personal (7s, 772KiB)
+     Personal vault: exported (encrypted)
+     Organizations: 1 exported
+     Attachments: none
+
+  ❌ work (failed with exit 1, 12s, 0B)
+     Personal vault: FAILED
+     Organizations: 2 failed
+     Attachments: none
+  ```
+
+Without `BW_VAULTS` nothing changes: the single vault is configured as before and writes straight into `/var/data`.
+
+## Handling secrets
+
+This container automates the official [Bitwarden CLI](https://bitwarden.com/help/cli/). **It does not save, trace or store any information of its own**, and the CLI session is closed once the backup is done.
+
+### Passwords stay off the command line
+
+Any user on the host can read the command line of any process with `ps`, including processes inside a container, under Docker as under Podman. So the script never passes a password as an argument:
+
+- the master password (`BW_PASSWORD`) reaches `bw unlock` through an environment variable (`--passwordenv`), which only the process owner and root can read;
+- the export password (`EXPORT_PASSWORD`) reaches `bw export` through stdin, answering the CLI's own prompt. That prompt is kept out of the log, since it is redrawn once per character and would give away the password's length.
+
+Nothing has to be configured for this. Each of the six secret-carrying variables (`BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`, `EXPORT_PASSWORD`, `NOTIFICATION_URL` and `PING_URL`) also has a **`_FILE` variant**, such as `BW_PASSWORD_FILE`, that holds the path of a file with the value: the convention of the official Docker images (`POSTGRES_PASSWORD_FILE` and the like). With files, the container's configuration holds only paths, so `docker inspect` shows no secret. A value is read only when it is used, and handed only to the program that needs it.
+
+- **`NAME_FILE`** is always a path. A file that does not exist, cannot be read or is empty is reported: for a credential the run stops, and a notification or ping URL is skipped with a warning. Setting both `NAME` and `NAME_FILE` is the same kind of error.
+- **`NAME`** keeps working as before: the value itself, or the path of a file holding it. A path under `/run/secrets` that does not exist is treated as a secret that was not mounted, never as a literal value.
+- If `EXPORT_PASSWORD` or `EXPORT_PASSWORD_FILE` is set but no password can be read from it, the run fails: the vault is never exported unencrypted in its place.
+
+### Option A: Docker secrets
+
+```bash
+mkdir -p ./.secrets && chmod 700 ./.secrets
+echo '<client id>'        > ./.secrets/.bwclientid
+echo '<client secret>'    > ./.secrets/.bwsecret
+echo '<master password>'  > ./.secrets/.bwpassword
+echo '<export password>'  > ./.secrets/.exportpassword
+# Optional, only if you use them:
+echo '<shoutrrr url>'     > ./.secrets/.notificationurl
+echo '<ping url>'         > ./.secrets/.pingurl
+chmod 400 ./.secrets/.*
+```
+
+The notification and ping secrets are optional. Leave their lines commented out unless you created their files: Compose refuses to start with a secret whose file does not exist.
+
+```yaml
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      - BW_CLIENTID_FILE=/run/secrets/bwclientid
+      - BW_CLIENTSECRET_FILE=/run/secrets/bwsecret
+      - BW_PASSWORD_FILE=/run/secrets/bwpassword
+      - EXPORT_PASSWORD_FILE=/run/secrets/exportpassword
+      # Optional:
+      # - NOTIFICATION_URL_FILE=/run/secrets/notificationurl
+      # - PING_URL_FILE=/run/secrets/pingurl
+    secrets:
+      - bwclientid
+      - bwsecret
+      - bwpassword
+      - exportpassword
+      # - notificationurl
+      # - pingurl
+
+secrets:
+  bwclientid:
+    file: ./.secrets/.bwclientid
+  bwsecret:
+    file: ./.secrets/.bwsecret
+  bwpassword:
+    file: ./.secrets/.bwpassword
+  exportpassword:
+    file: ./.secrets/.exportpassword
+  # notificationurl:
+  #   file: ./.secrets/.notificationurl
+  # pingurl:
+  #   file: ./.secrets/.pingurl
+```
+
+Mount `/var/data` and `/var/attachments` separately, never a parent such as `/var`: the image declares both as volumes, so Docker would put anonymous volumes over them and the exports would never reach your folder.
+
+See [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml). Reference: [Docker secrets in Compose](https://docs.docker.com/compose/use-secrets/).
+
+### Option B: Infisical
+
+1. Create a [free Infisical account](https://app.infisical.com/signup) and a project.
+2. Add the secrets `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` and, optionally, `EXPORT_PASSWORD`.
+
+   ![Secret values](docs/assets/infisical1.png)
+
+3. Create a [service token](https://infisical.com/docs/internals/service-tokens) under *Project → Access Control → Service Tokens*, with the name and *Secrets Path* you need.
+
+   ![Service token](docs/assets/infisical2.png)
+   ![Service token](docs/assets/infisical3.png)
+
+4. Set `INFISICAL_TOKEN` to that token, then start the container as usual. `INFISICAL_PATH` is optional: the token's own *Secrets Path* always applies (see below).
+
+   ![Compose sample](docs/assets/infisical4.png)
+
+See also [`docker-compose.infisical.sample.yml`](docker-compose.infisical.sample.yml).
+
+> [!IMPORTANT]
+> A service token carries its own environment and *Secrets Path*, and Infisical always applies them: `INFISICAL_PATH` cannot point a token anywhere else, and a wrong value is not reported as an error. If a run uses the wrong secrets, check the token's scope in Infisical, not `INFISICAL_PATH`.
 >
-> When the same variable is set both in the compose file and in Infisical, the Infisical value is used.
+> When a variable is set both in the compose file and in Infisical, the Infisical value wins.
+>
+> If the secrets cannot be fetched, the container exits with code 1 and, when notifications are on, sends a message carrying Infisical's own error.
 
-![compose sample](docs/assets/infisical4.png)
+## Notifications
 
-### Notification in Telegram
+Set `NOTIFICATION_URL` to any [Shoutrrr service URL](https://shoutrrr.nickfedor.com/latest/services/overview/) and you get a message when the run starts, succeeds or fails. Both outcomes carry the [run summary](#what-it-produces) (duration, what was exported, organizations skipped, attachments saved, size), so a drop in the numbers shows without opening the log; a failure also carries the last lines of the log. The URL usually holds a token, so the container never prints it and hands it to Shoutrrr through the environment rather than on its command line. A notification that cannot be sent is logged without the address and does not change the backup's exit code.
 
-In order to receive notifications on Telegram, we must inform the following variable by replacing the values of $BOT_TOKEN and $CHAT_ID with the token of our bot and the chat id of our user:
+By default you get a message at the start and another at the end of every run, which on a daily schedule is two a day when all goes well. `NOTIFICATION_LEVEL=failure` sends only the failures, with the same summary and the last lines of the log; pair it with [`PING_URL`](#monitoring) so a run that never started is still noticed. Any other value is reported in the log and treated as `all`, since a typo should never be why an alert does not arrive.
+
+### Telegram
 
 ```bash
 NOTIFICATION_URL=telegram://$BOT_TOKEN@telegram/?channels=$CHAT_ID
-```
-
-Example:
-
-```bash
+# e.g.
 NOTIFICATION_URL=telegram://1009999999:AAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@telegram/?channels=19599999999
 ```
 
-When export finish correctly, you should receive a notification:
+![Telegram notification](docs/assets/bot-notification-1.png)
 
-![alt text](docs/assets/bot-notification-1.png)
+### Gotify
 
-The URL holds the bot token, so the container never prints it and hands it to
-Shoutrrr through the environment rather than on its command line, where any
-user on the host could read it with `ps`. If a notification cannot be sent, the
-log says so without the address, and the backup's exit code is not affected.
-
-If the Infisical secrets cannot be fetched, the container stops with exit code 1
-and, when notifications are on, sends a message saying so with Infisical's own
-error.
-
-### Notification in Gotify
-
-The notification URL is the Gotify host followed by an **application token**:
+The URL is the Gotify host followed by an **application token**:
 
 ```bash
 NOTIFICATION_URL=gotify://$GOTIFY_HOST/$GOTIFY_TOKEN
-```
-
-Example:
-
-```bash
+# e.g.
 NOTIFICATION_URL=gotify://gotify.example.com/gtfya.AbCdEf0123456789AbCdEf0123456789AbCdEf01234
 ```
 
-If Gotify runs under a subpath, add it before the token (`gotify://example.com/gotify/$GOTIFY_TOKEN`). If it is served over plain HTTP instead of HTTPS, append `?disabletls=yes`.
+If Gotify runs under a subpath, add it before the token (`gotify://example.com/gotify/$GOTIFY_TOKEN`). If it is served over plain HTTP, append `?disabletls=yes`. If it uses a certificate your container does not trust, such as a self-signed one, append `?skiptlsverify=yes`.
 
-Both token formats are accepted: the legacy one from Gotify below 3.0.0 (15 characters starting with `A`) and the one issued by Gotify 3.0.0 and later (`gtfya.` prefix, around 50 characters). Support for the newer format is why this image builds Shoutrrr from the [nicholas-fedor fork](https://github.com/nicholas-fedor/shoutrrr): the original `containrrr` project stopped at v0.8.0, which rejects any token that is not exactly 15 characters starting with `A`.
+Only an **application** token works; a client token is rejected when the URL is read.
 
-### Monitoring (healthchecks, uptime-kuma)
+Both token formats work: the legacy one from Gotify below 3.0.0 (15 characters starting with `A`) and the one issued by Gotify 3.0.0 and later (`gtfya.` prefix, around 50 characters). Support for the newer format is why this image builds Shoutrrr from the [nicholas-fedor fork](https://github.com/nicholas-fedor/shoutrrr): the original `containrrr` project stopped at v0.8.0, which rejects any token that is not exactly 15 characters starting with `A`.
 
-`NOTIFICATION_URL` tells a person what happened; `PING_URL` tells a machine. It
-is pinged when the export starts and again when it finishes, carrying the
-outcome, so a watchdog can tell a successful run from a failed one — and notice
-a run that never happened at all.
+## Monitoring
+
+`NOTIFICATION_URL` tells a person what happened; `PING_URL` tells a machine. It is pinged when the export starts and again when it finishes, carrying the outcome, so a watchdog can tell a successful run from a failed one — and notice a run that never happened at all.
 
 ```bash
 PING_URL=https://hc-ping.com/<your-uuid>
 ```
 
-That is everything healthchecks needs. The outcome is appended as a path
-segment: `/start` when the export begins, `/0` when it succeeds, and
-`/<exit code>` when it fails.
-
-Services that expect the outcome somewhere else use a placeholder. There are
-two, each with its own vocabulary:
+That is all healthchecks needs: the outcome is appended as a path segment, `/start` at the beginning, `/0` on success and `/<exit code>` on failure. Services that expect the outcome elsewhere use a placeholder:
 
 | Placeholder | Start | Success | Failure |
-|-------------|-------------|-----------|------------------------|
-| `{code}`    | `start`     | `0`       | the export's exit code |
-| `{status}`  | *not pinged* | `up`     | `down`                 |
+|---|---|---|---|
+| `{code}` | `start` | `0` | the export's exit code |
+| `{status}` | *not pinged* | `up` | `down` |
 
-A URL using `{status}` is not pinged at start: that vocabulary has no value
-meaning "starting", and a push monitor has no concept of one.
+A URL using `{status}` is not pinged at start: that vocabulary has no value meaning "starting", and a push monitor has no concept of one.
 
 ```bash
 # healthchecks, written out explicitly — same behaviour as the example above
@@ -267,40 +492,119 @@ PING_URL=https://kuma.example.com/api/push/<token>?status={status}
 PING_URL=https://kuma.example.com/api/push/<token>?status={status}&msg=exit-{code}
 ```
 
-A trailing slash is removed before anything is appended, so
-`https://hc-ping.com/<uuid>` and `https://hc-ping.com/<uuid>/` behave the same.
+A trailing slash is removed before anything is appended, so `https://hc-ping.com/<uuid>` and `https://hc-ping.com/<uuid>/` behave the same. A failed ping never fails the backup: it is logged as a warning and the container still exits with the export's own status code. An unreachable monitor cannot hold the container open for long either — a refused connection or a name that does not resolve fails in about a second, a host that silently drops packets costs at most eleven, and there are two pings per run.
 
-A failed ping never fails the backup. It is reported as a warning and the
-container still exits with the export's own status code.
+## Scheduling
 
-An unreachable monitor also cannot hold the container open for long. A refused
-connection or a hostname that does not resolve fails in about a second; a host
-that silently drops the packets costs at most eleven, and there are two pings in
-a run, so roughly twenty seconds in the worst case.
+The container runs one export and exits, so the schedule lives on the host. With cron:
 
-## Run in Unraid
-
-Please see the following link [Bitwarden_Export Unraid Tempplate Readme](https://github.com/0neTX/UnRAID_Template/blob/main/bw-export/README.md)
-
----
-
-## PUID and PGID Variables
-
-Docker runs all of its containers under the `root` user domain because it requires access to things like network configuration, process management, and your filesystem. This means that the processes running inside your containers also run as `root`. This kind of elevated access is not ideal for day-to-day use, and potentially gives applications the access to things they shouldn't \(although, a strong understanding of volume and port mapping will help with this\).
-
-Another issue is file management within the container's mapped volumes. If the process is running under `root`, all files and directories created during the container's lifespan will be owned by `root`, thus becoming inaccessible by you.
-
-Using the `PUID` and `PGID` allows our containers to map the container's internal user to a user on the host machine. All of our containers use this method of user mapping and should be applied accordingly.
-
-### Using the variables
-
-When creating a container from one of our images, ensure you use the `-e PUID` and `-e PGID` options in your docker command:
-
-```shell
-docker create .... -e PUID=1000 -e PGID=1000 ....
+```cron
+# every day at 03:30
+30 3 * * * cd /opt/bw-export && docker compose run --rm bw-export >> /var/log/bw-export.log 2>&1
 ```
 
-Or, if you use `docker-compose`, add them to the `environment:` section:
+A systemd timer, Unraid's own scheduler or a container scheduler such as [Ofelia](https://github.com/mcuadros/ofelia) work just as well. Because the container exits with the export's status code, cron and your orchestrator see a failed backup as a failure; pair it with [`PING_URL`](#monitoring) so a run that never started is noticed too.
+
+## Retention
+
+```yaml
+environment:
+  - KEEP_LAST_BACKUPS=5
+```
+
+Each run writes its own `<DateTime>-bw-export` folder. With `KEEP_LAST_BACKUPS` set, the container sorts those folders and deletes the oldest ones, keeping the number you ask for.
+
+![Keep last sample](docs/assets/keep-last.png)
+
+A fixed window has a weakness: with daily backups and `KEEP_LAST_BACKUPS=7`, an item deleted by mistake and noticed two weeks later is gone from every backup. `KEEP_GFS` keeps backups spread over time instead (grandfather-father-son):
+
+```yaml
+environment:
+  - KEEP_GFS=7d:4w:6m
+```
+
+| Unit | Keeps |
+|---|---|
+| `d` | the newest backup of each of the last N days that have one |
+| `w` | the newest of each of the last N weeks (ISO weeks, Monday to Sunday) |
+| `m` | the newest of each of the last N months |
+| `y` | the newest of each of the last N years |
+
+With one backup a day, `7d:4w:6m` holds about 15 backups that reach six months back. Units can come in any order and any can be left out (`30d`, `4w:12m:2y`). When both variables are set, a backup either of them keeps is kept.
+
+Either way:
+
+- only folders named `<14 digits>-bw-export` directly inside the output and attachments paths are ever deleted;
+- the backup the run has just written is always kept, even with `KEEP_LAST_BACKUPS=0`;
+- when the run is incomplete, nothing is deleted, so a broken export never pushes a good one out;
+- an invalid value deletes nothing and makes the run exit `1` after the backup has been written.
+
+## Encrypted attachments
+
+`EXPORT_PASSWORD` encrypts the vault exports, but attachments (SSH keys, certificates, recovery codes, scanned documents) are saved as plain files. With `ENCRYPT_ATTACHMENTS=true` each run instead writes one `attachments.tar.gz.gpg` into its attachments folder, encrypted with `EXPORT_PASSWORD` (AES-256, OpenPGP format).
+
+```yaml
+environment:
+  - EXPORT_PASSWORD=<EXPORT PASSWORD>
+  - ENCRYPT_ATTACHMENTS=true
+```
+
+- The attachments are downloaded to a private temporary folder **inside the container** and only the encrypted archive reaches your volume, so no plain copy lands on the NAS or in its snapshots. That folder needs room for one run's attachments; it is deleted however the run ends.
+- Each archive is decrypted once after it is written, to prove it can be restored.
+- If encryption fails, the run fails and nothing is kept in the clear.
+- `EXPORT_PASSWORD` is required: without it the container stops before exporting anything.
+
+To restore, on any machine with GnuPG ([Gpg4win](https://www.gpg4win.org/) on Windows, [GPG Suite](https://gpgtools.org/) on macOS):
+
+```bash
+gpg -d attachments.tar.gz.gpg | tar -xz
+```
+
+GnuPG asks for the password, and the folders are recreated in the current directory, one per vault item.
+
+On **Windows**, install [Gpg4win](https://www.gpg4win.org/) and use two steps in PowerShell, because Windows PowerShell corrupts binary data sent through a pipe:
+
+```powershell
+gpg -o attachments.tar.gz -d attachments.tar.gz.gpg
+tar -xzf attachments.tar.gz
+```
+
+`tar` is part of Windows 10 and later. Kleopatra, which comes with Gpg4win, does the first step from the file's right-click menu (*Decrypt and verify*), and 7-Zip opens the resulting `.tar.gz`.
+
+## Permissions of the backups
+
+The Bitwarden CLI already writes what it saves with restricted modes: the exports and the attachments are `600` and each vault item's folder is `700`, so another user of the host cannot read them. What is left open is what the container itself creates, with its `umask` (normally `022`):
+
+- each run's `<DateTime>-bw-export` folder, in the data and attachments paths, is `755`. Anyone who can reach the volume can list what is inside: the names of your vault items and of their attachments, and the export files;
+- the encrypted attachments archive (`ENCRYPT_ATTACHMENTS`) is `644`. It is encrypted, but anyone can copy it.
+
+```yaml
+environment:
+  - BACKUP_PERMISSIONS=private
+```
+
+| | Default | `private` |
+|---|---|---|
+| Each run's folders (`<DateTime>-bw-export`) | `755` | `700` |
+| The encrypted attachments archive | `644` | `600` |
+| Exports and attachments written by the CLI, and each item's folder | `600` / `700` | `600` / `700` (the CLI's own modes) |
+
+- It applies from before the first file of the run exists, and is checked again at the end for filesystems that ignore the `umask` (shares with default ACLs). The folders you mount, `/var/data` and `/var/attachments`, are never changed.
+- **It takes access away from anyone who is not the owner.** The owner is `root` by default, the `PUID` user if you set one, or the `user:` of the [hardened setup](#hardened-setup). A script or a share that lists or copies the backups as another user stops working: give it the same user or leave this off.
+- It is not applied to the log (`FILE_LOG`), which keeps its own mode.
+- A filesystem without Unix modes, such as an NTFS share, cannot be restricted: the run still works and says so in a warning.
+- Backups written earlier are not changed. Change them once with `chmod -R go-rwx <folder>`.
+
+## Off-site copy (3-2-1)
+
+All backups live on one volume, so a failed disk, a stolen server or ransomware takes them all. The image does not upload anything itself; [`docker-compose.offsite.sample.yml`](docker-compose.offsite.sample.yml) adds an [rclone](https://rclone.org/) sidecar that copies the export folders to any of rclone's remotes (S3, Backblaze B2, WebDAV/Nextcloud, SFTP, Google Drive, …), keeping the remote's credentials out of the bw-export container.
+
+- Set `EXPORT_PASSWORD` and `ENCRYPT_ATTACHMENTS=true`, so everything that leaves the host is encrypted.
+- The sidecar mounts the backups **read-only** and uses `rclone copy`, which never deletes on the remote: a backup lost locally is still there. Expire old copies with the provider's lifecycle rules (ideally with versioning or object lock), not with `rclone sync`, which would mirror local deletions.
+
+## File ownership: PUID and PGID
+
+Processes inside a container run as `root` by default, so every file created in a mounted volume ends up owned by `root` and out of your reach. `PUID` and `PGID` map the container's internal user onto a user on the host:
 
 ```yaml
 environment:
@@ -308,58 +612,163 @@ environment:
   - PGID=1000
 ```
 
-It is most likely that you will use the `id` of yourself, which can be obtained by running the command below. The two values you will be interested in are the `uid` and `gid`.
-
-```shell
-id $user
+```bash
+docker create ... -e PUID=1000 -e PGID=1000 ...
 ```
+
+Use your own ids, which `id $user` reports as `uid` and `gid`.
+
+> [!TIP]
+> **Set them even if root-owned files do not bother you.** Without `PUID`, the export itself runs as root: the Bitwarden CLI, which handles your master password, then has root's access to everything mounted in the container. With `PUID`/`PGID` it runs as that user and can write only to the backup folders and its own data folder. For a container that stays up with `CRON`, the [hardened setup](#hardened-setup) goes further: it never starts as root at all.
 
 ### Rootless Podman
 
-Rootless Podman maps the container's uids onto your subordinate uid range, so
-`PUID=1000` inside the container is **not** uid 1000 on the host: exports land
-owned by an unknown user, or cannot be written at all. Add the
-[`compose.podman.yml`](compose.podman.yml) override, which uses `keep-id` so your
-uid means the same inside and outside the container:
+Rootless Podman maps the container's uids onto your subordinate uid range, so `PUID=1000` inside the container is **not** uid 1000 on the host: exports end up owned by an unknown user, or cannot be written at all. Add the [`compose.podman.yml`](compose.podman.yml) override, which uses `keep-id` so your uid means the same inside and outside the container:
 
-```shell
+```bash
 podman compose -f docker-compose.yml -f compose.podman.yml up
 ```
 
-With it, `PUID`/`PGID` behave exactly as under Docker. Without `PUID`, rootless
-Podman already writes the files as you, since the container's root is your user.
-The override is Podman only: Docker rejects `keep-id`.
+With it, `PUID`/`PGID` behave exactly as under Docker. Without `PUID`, rootless Podman already writes the files as you, since the container's root is your user. The override is Podman only: Docker rejects `keep-id`.
 
-On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g.
-`./export:/var/data:z`, or the container cannot read them.
+On SELinux hosts (Fedora, RHEL) also add `:z` to the bind mounts, e.g. `./export:/var/data:z`, or the container cannot read them.
 
-## KEEP_LAST_BACKUPS Variable
+## Hardened setup
 
-Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted.
+With `CRON` the container stays up around the clock, holding everything needed to open your vault. [`docker-compose.hardened.sample.yml`](docker-compose.hardened.sample.yml) runs it with as little as possible:
 
-```yaml
-environment:
-  - KEEP_LAST_BACKUPS=5
+| Setting | Effect |
+|---|---|
+| `user: "1000:1000"` | Never root. The user setup and `su` are skipped, and the files are created as that uid:gid. |
+| `read_only: true` | Nothing in the image can be modified. |
+| `tmpfs: /tmp` | The only writable place outside the volumes, in memory: the CLI's session data (so its tokens never touch the disk), the default log and, with `ENCRYPT_ATTACHMENTS`, one run's attachments before they are encrypted. Size it to fit them. |
+| `cap_drop: [ALL]`, `no-new-privileges` | No kernel capabilities, and no way to gain any. |
+| `secrets:` | `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` and `EXPORT_PASSWORD` are read from files through their `_FILE` variables instead of environment variables, so `docker inspect` does not show them. |
+
+What changes when the container does not start as root:
+
+- **`PUID`/`PGID` are ignored**: the `user:` setting already decides who owns the files, and the container says so if they are set.
+- **The mounted folders must be writable by that user**, e.g. `sudo chown -R 1000:1000 export`. A folder it cannot write to stops the run before anything is exported, naming the folder and the uid.
+- When the image's own folder cannot be written to (`read_only`, or any user other than the image's), the CLI's data and the default log move to `/tmp`. Set `FILE_LOG` inside a volume to keep the log across restarts.
+
+> [!NOTE]
+> **Rootless Podman** cannot start this file as is: with `read_only: true` it has nowhere to create the mount points for the Docker secrets under `/run/secrets`, and stops with `crun: open …/run/secrets/<name>: No such file or directory`. Under Podman set `read_only: false`; every other setting in the file works.
+
+`read_only` and `cap_drop: [ALL]` need `user:` as well. Started as root, the container sets its user up with `usermod` and `chown` and then switches to it with `su`, which a read-only filesystem and a capability-less container both prevent.
+
+## Platform notes
+
+- **Unraid**: see the [Bitwarden_Export Unraid template README](https://github.com/0neTX/UnRAID_Template/blob/main/bw-export/README.md).
+- **SELinux hosts**: add `:z` to the bind mounts.
+- **Windows / macOS**: adapt the volume paths in the compose file.
+
+## Image tags
+
+| Tag | Published from | Use it for |
+|---|---|---|
+| `0netx/bw-export:latest` | a `v*` release tag | production |
+| `0netx/bw-export:beta` | the `dev` branch | testing what is coming next |
+| `0netx/bw-export:<commit sha>` | each build | pinning one exact build |
+
+## Troubleshooting
+
+### Reading the log
+
+Each line is `<date> <time> LEVEL: message`, where the level is `INFO`, `WARNING`, `ERROR`, or `HINT` (what to do about the line above). The first lines of every run say what it is about to do, which is what a support request needs before anything else:
+
+```text
+2026-11-20 17:54:10 INFO: bw-export 2.00, Bitwarden CLI 2026.11.0
+2026-11-20 17:54:10 INFO: Mode: one backup, then exit, timezone UTC
+2026-11-20 17:54:10 INFO: Runs as uid 1000, gid 1000
+2026-11-20 17:54:10 INFO: Vaults: one; notifications: on; monitoring ping: off; Infisical: off; log file: on
+2026-11-20 17:54:10 INFO: Server: self-hosted, Vaultwarden 1.37.4
+2026-11-20 17:54:10 INFO: Credentials: BW_CLIENTID set, BW_CLIENTSECRET set, BW_PASSWORD from a file
+2026-11-20 17:54:10 INFO: Vault export: encrypted with EXPORT_PASSWORD (from a Docker secret)
+...
 ```
 
-Each export is saved in the output folder with the template `<DateTime>-bw-export`.
-When the variable `KEEP_LAST_BACKUPS` is set, the container will sort the folders and delete the oldest ones while keeping the number of folders indicated by the variable.
+Messages from the Bitwarden CLI itself appear indented under the error they explain, prefixed with `bw:`.
 
-![Keep Last Sample](docs/assets/keep-last.png)
+**The log is safe to share.** It never contains a password, API key, token or notification URL, a self-hosted server's address (only its kind and Vaultwarden version), or anything from inside your vault: no item, folder, organization or attachment names. Organizations and failed attachments are named by their IDs. When asking for help, paste the whole log of a failing run, from the `bw-export` line to `Run finished with exit code`.
 
-## Upgrading: attachments path
+### Common problems
 
-Earlier versions of this README and of `docker-compose.yml` mounted the
-attachments folder on `/var/attachment`, but the image saves attachments to
-`/var/attachments`. With that mount the export succeeded and **the attachments
-never reached the host folder**: they went to an anonymous Docker volume
-instead. Unraid's template already uses `/var/attachments` and is not affected.
 
-**What changes for you**
+| Symptom | Cause and fix |
+|---|---|
+| `Failed to unlock vault with BW_PASSWORD`, but the password is right | Vaultwarden older than 1.37.4. Upgrade the server; see [Requirements](#requirements). |
+| The CLI refuses your server URL | `BW_URL_SERVER` must be HTTPS. Plain HTTP is rejected. |
+| `Failed to export the organization vault`, then `You are not logged in.` | Only a confirmed Owner or Admin, or a custom role allowed to, can export an organization; the server refuses anyone else and the CLI logs itself out. Left unset, `BW_ORGANIZATIONS_LIST` already skips those organizations and logs `Skipping organization`. If you listed one by hand, remove it, or set `BW_ORGANIZATIONS_LIST=none`. |
+| `Could not find the folder in which to save the files` | `OUTPUT_PATH` or `ATTACHMENTS_PATH` points somewhere that is not mounted in the container. |
+| The export works, but no attachments appear on the host | The old `/var/attachment` mount. See [Upgrade notes](#upgrade-notes). |
+| The run uses the wrong secrets with Infisical | The service token's own scope, not `INFISICAL_PATH`. See [Option B](#option-b-infisical). |
+| Exported files belong to `root`, or to nobody you recognise | Set `PUID`/`PGID`; under rootless Podman add `compose.podman.yml`. See [PUID and PGID](#file-ownership-puid-and-pgid). |
+| The log disappears with the container | Point `FILE_LOG` inside a mounted volume. |
+| No notification arrives | A failed notification is logged without the address and does not change the exit code. Check the log and the Shoutrrr URL. |
+| `Saved …` lines with item and file names are gone | Since 2.00 the log names no attachment: it says how many were saved, and names a failed one by its position and item ID. |
 
-- **You mount `/var/attachment` and do not set `ATTACHMENTS_PATH`:** nothing
-  breaks. The image notices the old mount, saves the attachments there, and logs
-  a warning. Change the mount to `/var/attachments` when convenient:
+## Upgrade notes
+
+### Upgrading to 2.00
+
+Every setting from 1.12 keeps its meaning, so most setups only need `docker compose pull` and a restart. Check these if they apply to you:
+
+- **You use Gotify notifications:** see [Notifications: Shoutrrr 0.25](#notifications-shoutrrr-025). A self-signed certificate now needs `skiptlsverify=yes`, and only application tokens work.
+- **You read or parse the container log:** every line is now `<date> <time> LEVEL: message` (see [Reading the log](#reading-the-log)). The run ends with `Run finished with exit code N` instead of `Return Code: N`. The log no longer names attachments, organizations or the server.
+- **You set `CRON`:** it must be a schedule only, i.e. 5 to 7 fields or a macro. Anything after the schedule stops the container at start; supercronic never accepted `@every` either.
+- **You have items with the same name:** their attachments now go to separate folders, `Passport (1a2b3c4d)`, instead of overwriting each other. Unique names keep their folders.
+- **You belong to organizations you do not own or administer:** they are skipped now; see [below](#organizations-you-do-not-own-or-administer).
+- **Self-hosted:** Vaultwarden 1.37.4 or later, as in 1.12.
+
+New and optional: [several vaults](#several-vaults) in one container, `CRON` scheduling, [encrypted attachments](#encrypted-attachments), [GFS retention](#retention), [`BACKUP_PERMISSIONS`](#permissions-of-the-backups), `NOTIFICATION_LEVEL`, `*_FILE` for every secret, and a [hardened profile](#hardened-setup).
+
+### Notifications: Shoutrrr 0.25
+
+The image now ships Shoutrrr 0.25 instead of 0.22, which fixes two high-severity vulnerabilities in the Go runtime it was built with. Telegram and the other URLs keep working as before, but a few services changed:
+
+- **Gotify:** `disabletls=yes` no longer skips certificate verification. For a self-signed certificate, add `skiptlsverify=yes`. And only application tokens are accepted, not client tokens.
+- **All services:** a message counts as delivered only on a 2xx answer, and a redirect to another host or from HTTPS to HTTP is refused instead of followed. A notification that used to fail silently may now be reported as failed; it never changes the backup's own exit code.
+- **Discord:** `@everyone`, `@here` and mentions written in the message no longer ping; list them in the URL's `mentions` key.
+- URLs are checked more strictly when read: an invalid port or a `..` in a path is rejected.
+
+If a notification stops arriving after the upgrade, the log says so (`WARNING: Sending the notification failed`). See the [Shoutrrr release notes](https://github.com/nicholas-fedor/shoutrrr/releases) for every service.
+
+### Bitwarden CLI data folder
+
+The CLI's session data now lives in `/app/data`, the only folder in `/app` the export user can write to; the rest of `/app` belongs to root. Earlier versions kept that data in `/app` itself and gave the whole folder to that user. Nothing needs changing: on start the container moves ownership back and removes the old `/app/data.json`, which held only the previous run's logged-out session. A `BITWARDENCLI_APPDATA_DIR` you set yourself is still used.
+
+### Moving to several vaults
+
+A single-vault setup keeps working unchanged. To back up a second account, move the existing one into `BW_VAULTS` too: its `BW_CLIENTID` becomes `VAULT_<NAME>_BW_CLIENTID`, and so on.
+
+From then on its new backups go to `/var/data/<name>/`. The ones already at the top of `/var/data` stay where they are and are no longer rotated by `KEEP_LAST_BACKUPS` or `KEEP_GFS`, which now look inside each vault's folder. Nothing is lost; to keep them under rotation, move them into the vault's folder once, with the container stopped:
+
+```bash
+mkdir -p export/data/personal && mv export/data/*-bw-export export/data/personal/
+mkdir -p export/attachments/personal && mv export/attachments/*-bw-export export/attachments/personal/
+```
+
+### Organizations you do not own or administer
+
+Only a confirmed Owner or Admin, or a custom role allowed to, can export an organization. Without `BW_ORGANIZATIONS_LIST`, the image used to try every organization you belong to, and the server refused the others. The CLI then logged itself out, so the attachments, and any organization tried after it, were lost too. Before 1.12 all of this was reported as a successful backup. Those organizations are now skipped, each one with a `Skipping organization` line in the log.
+
+- **You own or administer every organization you belong to, or you set `BW_ORGANIZATIONS_LIST`:** nothing changes.
+- **You belong to an organization as User or Manager:** the run stops failing, and your attachments and the organizations you do own are saved again. That organization's backup is the job of whoever owns it.
+- **You use bitwarden.com with a Custom role that may export:** the CLI does not show a custom role's permissions, so that organization is no longer exported on its own. Add its ID to `BW_ORGANIZATIONS_LIST`.
+
+### Rotation of old backups
+
+`KEEP_LAST_BACKUPS` works as before, with three safety fixes. Most setups see no difference.
+
+- Only `<14 digits>-bw-export` folders **directly** inside the output and attachments paths are deleted. Before, any folder whose name ended in `-bw-export` counted, at any depth, including a vault item's attachments folder with such a name.
+- A folder name with spaces no longer breaks the rotation.
+- `KEEP_LAST_BACKUPS=0` keeps the backup just written instead of deleting it.
+
+### Attachments path
+
+Earlier versions of this README and of `docker-compose.yml` mounted the attachments folder on `/var/attachment`, but the image saves attachments to `/var/attachments`. With that mount the export succeeded and **the attachments never reached the host folder**: they went to an anonymous Docker volume instead. Unraid's template already uses `/var/attachments` and is not affected.
+
+- **You mount `/var/attachment` and do not set `ATTACHMENTS_PATH`:** nothing breaks. The image notices the old mount, saves the attachments there and logs a warning. Change the mount when convenient:
 
   ```yaml
   volumes:
@@ -367,34 +776,19 @@ instead. Unraid's template already uses `/var/attachments` and is not affected.
     - ./export:/var/attachments
   ```
 
-- **You mount `/var/attachments`, or set `ATTACHMENTS_PATH`:** nothing changes.
-  That includes mounting both paths to different folders: `/var/attachments`
-  keeps being used.
-- **You set `ATTACHMENTS_PATH=/var/attachment` without mounting it:** the run
-  now fails with `Could not find the folder in which to save the attachments`.
-  Before, the files were written inside the container and lost with it. Mount a
-  folder there, or drop the variable.
+- **You mount `/var/attachments`, or set `ATTACHMENTS_PATH`:** nothing changes. That includes mounting both paths to different folders — `/var/attachments` keeps being used.
+- **You set `ATTACHMENTS_PATH=/var/attachment` without mounting it:** the run now fails with `Could not find the folder in which to save the attachments`. Before, the files were written inside the container and lost with it. Mount a folder there, or drop the variable.
 
-**Recovering the attachments saved so far**
-
-They are in the anonymous volume of your existing container, as long as it has
-not been removed with `docker rm -v` or run with `--rm` (`docker compose`
-keeps anonymous volumes when it recreates a container). Copy them out before
-recreating it, replacing `bw-export` with your container's name and `./export`
-with your host folder:
+**Recovering the attachments saved so far.** They are in the anonymous volume of your existing container, as long as it has not been removed with `docker rm -v` or run with `--rm` (`docker compose` keeps anonymous volumes when it recreates a container). Copy them out before recreating it, replacing `bw-export` with your container's name and `./export` with your host folder:
 
 ```bash
 docker run --rm --volumes-from bw-export -v ./export:/restore \
     --entrypoint cp 0netx/bw-export:latest -a /var/attachments/. /restore/
 ```
 
-Each run's attachments land in the same dated folder as its vault export. Under
-Docker the copied files belong to root; add `--user "$(id -u):$(id -g)"` if you
-need them to be yours (on SELinux hosts, also `:z` on the `/restore` mount).
+Each run's attachments land in the same dated folder as its vault export. Under Docker the copied files belong to root; add `--user "$(id -u):$(id -g)"` if you need them to be yours (on SELinux hosts, also `:z` on the `/restore` mount).
 
-# Developers only -  How to build the image
-
-## Clone repo and build docker image
+## Development
 
 ```bash
 git clone https://github.com/0neTX/Bitwarden_Export.git
@@ -402,16 +796,54 @@ cd Bitwarden_Export
 docker build --no-cache -t bw-export --progress=plain .
 ```
 
-## SPECIAL THANKS
+The unit suite needs no network and no containers:
 
-This docker image is based on the script of [@dh024/Bitwarden_Export](https://github.com/dh024/Bitwarden_Export) that I used as a base and inspiration. Thank you very much.
+```bash
+SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
+```
+
+See [`tests/README.md`](tests/README.md) for the rest of the suite, including the end-to-end tests.
+
+### Build arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `IMAGE_VERSION` | the release | The version the image reports (label and log). |
+| `BW_CLI_VERSION` | the tested CLI | Bitwarden CLI release to install. |
+| `BW_CLI_SHA256` | its digest | SHA-256 of that release's zip, checked before it is installed. Change it together with `BW_CLI_VERSION`; [CONTRIBUTING](CONTRIBUTING.md) shows how to get it. |
+| `SHOUTRRR_VERSION` / `SHOUTRRR_SHA256` | pinned | shoutrrr release and its checksum. |
+| `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` | pinned | supercronic release and its checksum. |
+
+```bash
+docker build --build-arg BW_CLI_VERSION=<version> --build-arg BW_CLI_SHA256=<sha256> -t bw-export .
+```
+
+## Contributing
+
+Pull requests go to **`dev`**, not `main`. The full guide is in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Bug reports: [open an issue](https://github.com/0neTX/Bitwarden_Export/issues/new/choose).
+
+## Security
+
+To report a vulnerability, follow [SECURITY.md](SECURITY.md). Please do not open a public issue for one.
+
+Running it safely:
+
+- **Do not run the export as root.** Set [`PUID`/`PGID`](#file-ownership-puid-and-pgid), or use the [hardened setup](#hardened-setup), which never starts as root.
+- **Keep secrets out of the compose file.** Use the `_FILE` variables with [Docker secrets](#option-a-docker-secrets) (including `INFISICAL_TOKEN_FILE`), or [Infisical](#option-b-infisical); values in `environment:` are visible to anyone who can run `docker inspect`.
+- **Encrypt what you store.** Set `EXPORT_PASSWORD` and `ENCRYPT_ATTACHMENTS=true`, and keep that password somewhere other than Bitwarden.
+- **Restrict who can read the backups** on a shared host with `BACKUP_PERMISSIONS=private`.
+- **The log is safe to share:** it never contains secrets, server addresses or names from your vault (see [Reading the log](#reading-the-log)).
+
+## Credits
+
+Based on the script from [@dh024/Bitwarden_Export](https://github.com/dh024/Bitwarden_Export), used as a base and inspiration. Thank you very much.
 
 ## Disclaimer
 
-Since the purpse of this docker image is to create a copy of all your passwords and secrets stored in Bitwarden, you should carefully inspect this docker image to ensure it meets your needs and that it will execute as you would expect. I provide no guarantees that it will work for you!
-
-* Note: the docker image will **not** export vault items in your Trash, nor will it export your password history -- this is a limitation of the Bitwarden CLI tools
+This image creates a copy of all the passwords and secrets stored in your vault. Inspect it carefully to make sure it does what you need and behaves as you expect. No guarantee is given that it will work for you.
 
 ## License
 
-This project is licensed under the GPL 3.0 License. See the [LICENSE](.\LICENSE) file for details.
+GPL-3.0-only. See [LICENSE](LICENSE).

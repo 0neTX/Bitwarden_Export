@@ -2,13 +2,29 @@
 
 Two layers:
 
-- **`run_tests.sh`** — 136 assertions against `bw_export.sh` using a stateful mock
-  of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers.
-- **`run_ping_tests.sh`** — 33 assertions against the `PING_URL` helpers in
+- **`run_tests.sh`** — assertions against `bw_export.sh` using a stateful mock
+  of the Bitwarden CLI (`mock/bw`). Fast, no network, no containers: `mock/curl`
+  answers like an unreachable server, so the log's server probe never leaves the
+  machine. It also checks that every log line has the one format and that no
+  secret, server address or vault name reaches the log.
+- **`run_ping_tests.sh`** — assertions against the `PING_URL` helpers in
   `root/usr/local/lib/bw-export/ping.sh`. Also fast, and needs no mock beyond a
   three-line stub for `curl`.
-- **`run_notify_tests.sh`** — 13 assertions against the `NOTIFICATION_URL` helper
+- **`run_notify_tests.sh`** — assertions against the `NOTIFICATION_URL` helper
   in `root/usr/local/lib/bw-export/notify.sh`, with a stub for `shoutrrr`.
+- **`run_cron_tests.sh`** — assertions against `entrypoint.sh`: `CRON`
+  scheduling and the one-shot mode, plus the non-root start.
+- **`run_secrets_tests.sh`** — assertions against `resolve_secret()` in
+  `root/usr/local/lib/bw-export/secrets.sh`: values, `/run/secrets` paths and
+  the `_FILE` variables.
+- **`run_retention_tests.sh`** — assertions against
+  `root/usr/local/lib/bw-export/retention.sh`, which decides the old backups
+  `KEEP_LAST_BACKUPS` and `KEEP_GFS` delete. Driven with folder names only;
+  nothing is created or deleted.
+- **`run_vaults_tests.sh`** — several vaults in one run (`BW_VAULTS`), through
+  `bw_export.sh` and the same mock: each vault's folders, key, server and CLI
+  session, a failing vault, inherited and per-vault options, configuration
+  errors, and that no vault's export sees another vault's variables.
 - **`compose.test.yml` + `e2e-setup.sh`** — a real Vaultwarden 1.37.4 and a
   bw-export image built from the repo `Dockerfile`, used to validate issue #21
   end to end.
@@ -19,7 +35,7 @@ Two layers:
 SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
 ```
 
-Expect `PASS=136 FAIL=0`. The suite is only worth anything if it fails on the
+Expect `FAIL=0`. The suite is only worth anything if it fails on the
 code it was written against, so as a control:
 
 ```bash
@@ -72,7 +88,7 @@ rootless Podman. Against a script without the function it fails once.
 bash tests/run_ping_tests.sh
 ```
 
-Expect `PASS=33 FAIL=0`. It covers the URL building (both placeholders, the
+Expect `FAIL=0`. It covers the URL building (both placeholders, the
 appended path segment when there is none, the trailing slash, and the start ping
 that `{status}` omits) and `send_ping`'s two guarantees: it logs the event
 without the URL, because that carries the monitor's token, even when the shell
@@ -102,7 +118,7 @@ LIB=/tmp/naive.sh bash tests/run_ping_tests.sh   # PASS=3 FAIL=30
 bash tests/run_notify_tests.sh
 ```
 
-Expect `PASS=13 FAIL=0`. The notification URL carries the service's
+Expect `FAIL=0`. The notification URL carries the service's
 credentials (a Telegram bot token, a Gotify app token), so the suite checks that
 it reaches `shoutrrr` through `SHOUTRRR_URL` and never through its argv, which
 any user on the host can read with `ps`; that it stays out of the log, also
@@ -235,7 +251,7 @@ docker run --rm --network host \
 
 The listener logs `GET /ping/start` and then `GET /ping/1`, in that order. It
 answers 404 to both, which is useful rather than a problem: the container must
-log `Warning: monitoring ping (...) failed; continuing.` and still exit 1, not 0
+log `WARNING: Monitoring ping (...) failed; continuing.` and still exit 1, not 0
 and not 22. That is the non-fatal guarantee, seen from outside.
 
 ### Teardown

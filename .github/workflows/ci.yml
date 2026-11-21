@@ -9,12 +9,19 @@ on:
       - main
       - dev
 
+# Every job only reads the repository: images go to Docker Hub with its own
+# credentials, and the GitHub API is only asked about public releases. Without
+# this the token gets the repository's default, which is write access, and so
+# does every action the job runs.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: shellcheck + unit suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Pinned rather than using the runner's shellcheck: versions disagree about
       # which findings exist, so an image update would fail unrelated pull
@@ -25,45 +32,74 @@ jobs:
           docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 \
             bw_export.sh entrypoint.sh root/usr/local/lib/bw-export/ping.sh \
             root/usr/local/lib/bw-export/notify.sh \
-            tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
-            tests/run_notify_tests.sh \
+            root/usr/local/lib/bw-export/secrets.sh \
+            root/usr/local/lib/bw-export/retention.sh \
+            root/usr/local/lib/bw-export/vaults.sh tests/run_vaults_tests.sh \
+            tests/mock/bw tests/mock/curl root/usr/local/lib/bw-export/log.sh \
+            root/etc/cont-init.d/10-adduser tests/run_tests.sh tests/run_ping_tests.sh \
+            tests/run_notify_tests.sh tests/run_cron_tests.sh \
+            tests/run_secrets_tests.sh tests/run_retention_tests.sh \
             tests/e2e-setup.sh tests/e2e-verify.sh
 
-      # 116 assertions against a stateful mock of the Bitwarden CLI. This covers
+      # Assertions against a stateful mock of the Bitwarden CLI. This covers
       # the script's logic only; it says nothing about the real CLI, which the
       # end-to-end suite in tests/e2e-setup.sh exercises.
       - name: unit suite
         run: SCRIPT="$PWD/bw_export.sh" bash tests/run_tests.sh
 
-      # 33 assertions against the PING_URL helpers. Separate from the suite
+      # Assertions against the PING_URL helpers. Separate from the suite
       # above because it drives a different unit: the URL building that
       # entrypoint.sh sources, which cannot be reached through bw_export.sh.
       - name: ping suite
         run: bash tests/run_ping_tests.sh
 
-      # 13 assertions against the NOTIFICATION_URL helper, for the same reason:
+      # Assertions against the NOTIFICATION_URL helper, for the same reason:
       # entrypoint.sh sources it and cannot be sourced by a test itself.
       - name: notify suite
         run: bash tests/run_notify_tests.sh
+
+      # Assertions against entrypoint.sh (CRON scheduling and one-shot compatibility).
+      - name: cron suite
+        run: bash tests/run_cron_tests.sh
+
+      # Assertions against resolve_secret() in root/usr/local/lib/bw-export/secrets.sh.
+      - name: secrets suite
+        run: bash tests/run_secrets_tests.sh
+
+      # 40 assertions on which old backups KEEP_LAST_BACKUPS and KEEP_GFS delete, driven through
+      # retention.sh directly with folder names.
+      - name: retention suite
+        run: bash tests/run_retention_tests.sh
+
+      # Several vaults in one run (BW_VAULTS), driven through bw_export.sh and
+      # the same mock: folders, keys, servers and sessions per vault, a failing
+      # vault, inheritance, and that no vault sees another's variables.
+      - name: vaults suite
+        run: SCRIPT="$PWD/bw_export.sh" bash tests/run_vaults_tests.sh
 
   build:
     name: docker build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Build only. Catches a broken Dockerfile at review time rather than when
       # a publish workflow pushes it to Docker Hub. Loaded into the daemon so
       # the labels can be read back below.
       - name: build image (no push)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: false
           load: true
           tags: bw-export:ci
+
+      - name: smoke-check supercronic and tzdata
+        run: |
+          docker run --rm --entrypoint supercronic bw-export:ci -version
+          docker run --rm --entrypoint date -e TZ=Europe/Madrid bw-export:ci +%Z | grep -Eq '^(CET|CEST)$'
 
       # Labels are inherited, and ubuntu:24.04 sets
       # org.opencontainers.image.version=24.04 on itself, so until this image
@@ -95,9 +131,13 @@ jobs:
           fi
 
           # base.name is written out in full, so it can fall out of step with a
-          # bumped FROM. That is the same drift this whole change is about.
+          # bumped FROM. That is the same drift this whole change is about. The
+          # FROM is pinned by digest, which base.name leaves out on purpose:
+          # Dependabot bumps the digest in FROM only, so only name and tag are
+          # compared.
           base=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.base.name"}}' bw-export:ci)
           from=$(sed -n 's/^FROM \(.*\)$/\1/p' Dockerfile | head -1)
+          from=${from%%@*}
           echo "org.opencontainers.image.base.name = $base (FROM $from)"
           case "$base" in
             "$from"|*"/$from") ;;

@@ -20,7 +20,7 @@ The unit suite is fast, needs no network and no containers:
 SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
 ```
 
-Expect `PASS=80 FAIL=0`. `tests/README.md` covers the rest, including the
+Expect `FAIL=0`. `tests/README.md` covers the rest, including the
 end-to-end suite that runs a real Vaultwarden behind TLS, and the two
 `entrypoint.sh` behaviours that can only be checked against a container.
 
@@ -36,8 +36,11 @@ machine can still fail CI. Use the same container:
 
 ```bash
 docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 \
-  bw_export.sh entrypoint.sh \
-  tests/mock/bw tests/run_tests.sh tests/e2e-setup.sh tests/e2e-verify.sh
+  bw_export.sh entrypoint.sh root/usr/local/lib/bw-export/ping.sh \
+  root/usr/local/lib/bw-export/notify.sh root/usr/local/lib/bw-export/retention.sh \
+  tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
+  tests/run_notify_tests.sh tests/run_cron_tests.sh tests/run_retention_tests.sh \
+  tests/e2e-setup.sh tests/e2e-verify.sh
 ```
 
 If a suppression is unavoidable, put it at the top of the file with a comment
@@ -50,6 +53,10 @@ saying why, as the existing scripts do.
 - The image version is declared in the `Dockerfile`. Bump it there.
 - Versions of the Bitwarden CLI and Shoutrrr are pinned on purpose. Changing one
   means saying what it was tested against.
+- Every downloaded binary is checked against a SHA-256 in the `Dockerfile`. A new
+  CLI version changes `BW_CLI_VERSION` and `BW_CLI_SHA256` together; the value is
+  the release asset's `digest` on GitHub:
+  `gh api repos/bitwarden/clients/releases/tags/cli-v<version> --jq '.assets[] | select(.name == "bw-bit-linux-<version>.zip") | .digest'`.
 - Comments explain *why* something is the way it is. What the code does is
   already in the code.
 

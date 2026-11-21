@@ -1,0 +1,28 @@
+# Backups on a schedule: the container stays up, backs up once on start, then
+# at every CRON time. Overlapping runs are skipped.
+#
+#   docker compose -f docker-compose.cron.sample.yml up -d
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    restart: unless-stopped
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      # Credentials (required).
+      - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - BW_PASSWORD=<BITWARDEN PASSWORD>
+      # Encryption (recommended).
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
+      # Schedule: daily at 03:00, local time.
+      - CRON=0 3 * * *
+      - TZ=Europe/Madrid
+      # Retention: without it, a scheduled container fills the disk.
+      - KEEP_LAST_BACKUPS=5
+      # Log: inside a volume, so it survives the container. Rotated at 100 MiB.
+      - FILE_LOG=/var/data/bw-export-logfile.log

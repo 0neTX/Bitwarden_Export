@@ -1,27 +1,53 @@
+# Quick start: one backup, then the container exits with the backup's status.
+#
+# Fill in the credentials and the export password, then:
+#   docker compose up
+#
+# The common options are listed below, commented out; the README's Configuration
+# section has every one. The other examples build on this:
+#   docker-compose.cron.sample.yml       backups on a schedule
+#   docker-compose.secrets.sample.yml    credentials as Docker secrets
+#   docker-compose.infisical.sample.yml  credentials from Infisical
+#   docker-compose.multi.sample.yml      several vaults in one container
+#   docker-compose.hardened.sample.yml   no root, read-only, no capabilities
+#   docker-compose.offsite.sample.yml    a second copy off the host (rclone)
+#   compose.podman.yml                   override for rootless Podman
 services:
   bw-export:
     container_name: bw-export
     image: 0netx/bw-export:latest
     volumes:
-      - ./export:/var/data
-      - ./export:/var/attachments
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
     environment:
+      # Credentials (required): a personal API key and the master password.
       - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
       - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
       - BW_PASSWORD=<BITWARDEN PASSWORD>
-      # Optional: Own Vaultwarden/Bitarden selfhosted server
-      #- BW_URL_SERVER=<YOUR VAULTWARDER URL SERVER>
-      # Optional: Warning, Incorrect value may have malfunction effect. By default, /var/data/
-      # - OUTPUT_PATH=<Output path i.e. /var/data/ >
-      # Optional: Warning, Incorrect value may have malfunction effect. By default, /var/attachments/
-      # - ATTACHMENTS_PATH=<attachment path i.e. /var/attachments/ >
-      - EXPORT_PASSWORD=<Export password. Export will be encrypted with this password>
-      # Optional: If not provided, the service will export all organizations in vault.
-      # - BW_ORGANIZATIONS_LIST=<Organization list id, comma separated>
-      # Optional: Execution logging file. Please check output path is mapping inside a volume
-      # - FILE_LOG=/var/data/bw-export-logfile.log
-      # Optional: Keep the maximum number of exports defined. A maximum of X exports will be retained, the oldest exports will be deleted.
+      # Encryption (recommended): exports are written in plain text without it.
+      # Do not keep this password only inside Bitwarden.
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      # - ENCRYPT_ATTACHMENTS=true
+      # Only the owner can read what a run writes (folders 700, files 600).
+      # - BACKUP_PERMISSIONS=private
+      # Server: leave commented out for bitwarden.com. Self-hosted must be HTTPS.
+      # - BW_URL_SERVER=https://vault.example.com
+      # Its certificate signed by your own CA? Mount the CA and point at it.
+      # - NODE_EXTRA_CA_CERTS=/certs/ca.crt
+      # Organizations: by default every one you own or administer. IDs, or "none".
+      # - BW_ORGANIZATIONS_LIST=<organization id>,<organization id>
+      # Schedule: keep the container running and back up on a cron expression.
+      # - CRON=0 3 * * *
+      # - TZ=Europe/Madrid
+      # Retention: the N newest backups, or daily/weekly/monthly ones.
       # - KEEP_LAST_BACKUPS=5
-      # Optional: Monitoring endpoint pinged at start and on completion (healthchecks, uptime-kuma, any dead man's switch)
-      # - PING_URL=https://hc-ping.com/<your-uuid>      
-
+      # - KEEP_GFS=7d:4w:6m
+      # Log, notifications and monitoring.
+      # - FILE_LOG=/var/data/bw-export-logfile.log
+      # - NOTIFICATION_URL=telegram://<token>@telegram?chats=<chat id>
+      # - NOTIFICATION_LEVEL=failure   # only a failed run notifies; default: all
+      # - PING_URL=https://hc-ping.com/<your-uuid>
+      # File ownership on the host, and the user the export runs as: recommended,
+      # so that it does not run as root (under rootless Podman, see compose.podman.yml).
+      # - PUID=1000
+      # - PGID=1000

@@ -40,11 +40,17 @@ export/
 .env
 .vscode/
 .secrets
+# Private compose files hold credentials: keep them in private/, ignored as a
+# whole whatever their names. docker-compose.*.yml stays as a second net for
+# private files left at the root; the public examples are the exception.
+private/
 docker-compose.prod.yml
 docker-compose.*.yml
+!docker-compose.*.sample.yml
 .infisical.json
 .vs/
 # e2e test runtime data (vaultwarden db, exports, throwaway secrets)
 tests/e2e/
 tests/sbx/
+tests/sbx-vaults/
 __pycache__/

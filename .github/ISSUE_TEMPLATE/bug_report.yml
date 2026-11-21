@@ -61,8 +61,12 @@ body:
     attributes:
       label: Log
       description: >-
-        The whole container log for a failing run, including the final
-        `Return Code:` line. Please redact anything identifying.
+        The whole container log for a failing run, from the first
+        `bw-export <version>` line to the final `Run finished with exit code`
+        line. Its first lines already give the versions, the mode and the
+        settings in use, so the configuration below is rarely needed. Since
+        2.00 the log carries no password, key, token, server address or name
+        from your vault; with older versions, redact those before pasting.
       render: shell
     validations:
       required: true

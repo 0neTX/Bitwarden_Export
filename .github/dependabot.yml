@@ -17,8 +17,20 @@ updates:
     # No labels: are set. Dependabot can only apply labels that already exist in
     # the repository, and there is no "dependencies" label here yet.
 
-  # Deliberately no docker ecosystem here. The base image is pinned to an LTS
-  # release on purpose, and BW_CLI_VERSION and SHOUTRRR_VERSION are pinned to
-  # versions that were tested against Vaultwarden; a bot proposing the newest of
-  # each would be noise at best. The nightly end-to-end run is what catches a
-  # Bitwarden CLI release that breaks login.
+  # The base image only: Dependabot reads FROM, not the ADD and curl downloads,
+  # so BW_CLI_VERSION and SHOUTRRR_VERSION stay pinned by hand to versions
+  # tested against Vaultwarden. The base is pinned to Ubuntu 24.04 by digest;
+  # this proposes a new digest when Ubuntu republishes 24.04 with security
+  # fixes, and never a newer Ubuntu release. The nightly end-to-end run is what
+  # catches a Bitwarden CLI release that breaks login.
+  - package-ecosystem: docker
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

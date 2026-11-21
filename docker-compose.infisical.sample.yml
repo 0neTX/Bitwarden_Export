@@ -1,17 +1,31 @@
+# Credentials from Infisical: BW_CLIENTID, BW_CLIENTSECRET, BW_PASSWORD and
+# EXPORT_PASSWORD are stored as secrets in an Infisical project, and only the
+# service token is here.
+#
+#   docker compose -f docker-compose.infisical.sample.yml up
+#
+# A service token carries its own environment and secrets path, and Infisical
+# always applies them: INFISICAL_PATH cannot point it anywhere else. A variable
+# set both here and in Infisical takes the Infisical value. If the secrets
+# cannot be fetched, the container exits with code 1.
 services:
   bw-export:
     container_name: bw-export
-    tty: true
     image: 0netx/bw-export:latest
     volumes:
       - ./export/data:/var/data
       - ./export/attachments:/var/attachments
     environment:
-      - FILE_LOG=/var/data/bw-export-logfile.log
+      # Credentials (required): the service token reads all of them.
+      - INFISICAL_TOKEN=<INFISICAL SERVICE TOKEN, st.…>
+      # Or keep it out of "docker inspect" with a Docker secret:
+      # - INFISICAL_TOKEN_FILE=/run/secrets/infisicaltoken
+      # - INFISICAL_PATH=/
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
+      # Retention.
       - KEEP_LAST_BACKUPS=3
-      - INFISICAL_TOKEN=st.aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      # Optional: Insfisical tokens subfolder collection
-      #- INFISICAL_PATH=/
-      # Optional: Monitoring endpoint pinged at start and on completion (healthchecks, uptime-kuma, any dead man's switch)
-      #- PING_URL=https://hc-ping.com/<your-uuid>
-      
+      # Log, notifications and monitoring.
+      - FILE_LOG=/var/data/bw-export-logfile.log
+      # - NOTIFICATION_URL=telegram://<token>@telegram?chats=<chat id>
+      # - PING_URL=https://hc-ping.com/<your-uuid>

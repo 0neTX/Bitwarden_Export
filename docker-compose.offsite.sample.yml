@@ -1,0 +1,64 @@
+# A second, off-site copy of the backups (the 3-2-1 rule), made by an rclone
+# sidecar. The bw-export image does not upload anything itself: rclone speaks
+# to S3, Backblaze B2, WebDAV/Nextcloud, SFTP, Google Drive and many more, and
+# its remote credentials then live in this sidecar only.
+#
+# 1. Create the remote once, interactively. Name it "offsite":
+#      docker run --rm -it -v "$PWD/rclone:/config/rclone" rclone/rclone:1.68.2 config
+# 2. docker compose -f docker-compose.offsite.sample.yml up -d
+#
+# With EXPORT_PASSWORD and ENCRYPT_ATTACHMENTS=true nothing readable leaves the
+# host: the vault exports and the attachments archive are both encrypted.
+#
+# "rclone copy" uploads new files and never deletes on the remote, so a backup
+# deleted here (by KEEP_GFS, by mistake, by ransomware) survives there. Expire
+# old copies with the provider's own lifecycle rules, ideally with object lock
+# or versioning, rather than with "rclone sync", which would mirror deletions.
+services:
+  bw-export:
+    container_name: bw-export
+    image: 0netx/bw-export:latest
+    restart: unless-stopped
+    volumes:
+      - ./export/data:/var/data
+      - ./export/attachments:/var/attachments
+    environment:
+      # Credentials (required).
+      - BW_CLIENTID=<CLIENT ID FROM BITWARDEN API>
+      - BW_CLIENTSECRET=<CLIENT SECRET FROM BITWARDEN API>
+      - BW_PASSWORD=<BITWARDEN PASSWORD>
+      # Encryption: nothing readable leaves the host.
+      - EXPORT_PASSWORD=<EXPORT PASSWORD>
+      - ENCRYPT_ATTACHMENTS=true
+      # Server: leave commented out for bitwarden.com.
+      # - BW_URL_SERVER=https://vault.example.com
+      # Schedule.
+      - CRON=0 3 * * *
+      - TZ=Europe/Madrid
+      # Retention: local only. The remote keeps every copy (see above).
+      - KEEP_GFS=7d:4w:6m
+
+  offsite:
+    container_name: bw-export-offsite
+    image: rclone/rclone:1.68.2
+    restart: unless-stopped
+    volumes:
+      # Read-only: the sidecar can never alter or delete the local backups.
+      - ./export:/data:ro
+      - ./rclone:/config/rclone
+    environment:
+      # Both containers start together, so the first pass waits for bw-export's
+      # initial backup (about a minute) instead of finding nothing and leaving
+      # the first off-site copy for 6 hours later.
+      - FIRST_DELAY=900
+    entrypoint: ["/bin/sh", "-c"]
+    # Then every 6 hours. Files already on the remote are skipped, so a run with
+    # nothing new costs a listing only. Logs and half-written archives (.part)
+    # are never uploaded.
+    command:
+      - |
+        sleep "$${FIRST_DELAY:-900}"
+        while true; do
+          rclone copy /data offsite:bw-export --exclude '*.log' --exclude '*.log.1' --exclude '*.part' --log-level NOTICE
+          sleep 21600
+        done

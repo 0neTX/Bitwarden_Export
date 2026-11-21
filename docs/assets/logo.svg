@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Bitwarden_Export">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <!-- A shield: the vault's contents are kept safe. -->
+  <path d="M64 8 18 24v40c0 28 20 48 46 56 26-8 46-28 46-56V24L64 8z" fill="url(#g)"/>
+  <!-- An arrow onto a line: the copy leaving the vault, which is what this does. -->
+  <path d="M64 36v34" stroke="#fff" stroke-width="9" stroke-linecap="round" fill="none"/>
+  <path d="M46 56l18 18 18-18" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M40 88h48" stroke="#fff" stroke-width="9" stroke-linecap="round" fill="none"/>
+</svg>

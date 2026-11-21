@@ -14,6 +14,7 @@
 # input of its own in ci.yml.
 # shellcheck disable=SC1091,SC2030,SC2031
 SP="$(cd "$(dirname "$0")" && pwd)"
+export LOG_LIB="$SP/../root/usr/local/lib/bw-export/log.sh"
 LIB="${LIB:-$SP/../root/usr/local/lib/bw-export/ping.sh}"
 SBX="$SP/sbx/ping"
 pass=0; fail=0
@@ -96,7 +97,7 @@ rc=$( export PATH="$SBX/bin:$PATH" PING_URL="$HC" CURL_EXIT=22
       send_ping failure 3 > "$SBX/out" 2>&1; echo $? )
 eq "send_ping still returns 0" "0" "$rc"
 eq "warned without the URL" "0" \
-   "$(grep -q "monitoring ping (failure) failed" "$SBX/out" && ! grep -q "0d1e2f" "$SBX/out"; echo $?)"
+   "$(grep -q "Monitoring ping (failure) failed" "$SBX/out" && ! grep -q "0d1e2f" "$SBX/out"; echo $?)"
 
 # The guard for #22: entrypoint.sh pings from an EXIT trap, and send_notification
 # leaves "set -e" on in that shell. If the curl failure were ever allowed to
@@ -119,6 +120,47 @@ echo "=== P9: unset PING_URL does nothing at all ==="
   send_ping start; send_ping success 0 ) > "$SBX/out" 2>&1
 eq "curl never called" "0"  "$(wc -c < "$CURL_LOG")"
 eq "nothing logged"    "0"  "$(wc -c < "$SBX/out")"
+
+echo "=== P10: PING_URL as a file path (with trailing newline) ==="
+: > "$CURL_LOG"
+printf 'https://hc-ping.com/SECRET-token-file/{code}\n' > "$SBX/ping.secret"
+( export PATH="$SBX/bin:$PATH" PING_URL="$SBX/ping.secret"; send_ping success 0 ) > "$SBX/out" 2>&1
+eq "called once"          "1"  "$(wc -l < "$CURL_LOG")"
+eq "pinged resolved URL"  "https://hc-ping.com/SECRET-token-file/0" "$(awk '{print $NF}' "$CURL_LOG")"
+eq "token not logged"     "0"  "$(grep -c SECRET "$SBX/out")"
+
+echo "=== P11: PING_URL pointing to an empty file does not ping and warns ==="
+: > "$CURL_LOG"
+: > "$SBX/ping.empty"
+( export PATH="$SBX/bin:$PATH" PING_URL="$SBX/ping.empty"; send_ping start ) > "$SBX/out" 2>&1
+eq "curl not called"  "0" "$(wc -c < "$CURL_LOG")"
+eq "warns empty file" "1" "$(grep -c 'empty file' "$SBX/out")"
+
+echo "=== P12: PING_URL pointing to an unreadable file does not ping and warns ==="
+: > "$CURL_LOG"
+printf 'https://hc-ping.com/SECRET-token-file\n' > "$SBX/ping.unreadable"
+chmod 000 "$SBX/ping.unreadable"
+if [ "$(id -u)" -ne 0 ]; then
+  ( export PATH="$SBX/bin:$PATH" PING_URL="$SBX/ping.unreadable"; send_ping start ) > "$SBX/out" 2>&1
+  eq "curl not called"  "0" "$(wc -c < "$CURL_LOG")"
+  eq "warns unreadable" "1" "$(grep -c 'cannot be read' "$SBX/out")"
+else
+  echo "  SKIP  2 assertions: root reads any file, so it cannot be made unreadable"
+fi
+chmod 600 "$SBX/ping.unreadable"
+
+echo "=== P14: PING_URL_FILE is read ==="
+: > "$CURL_LOG"
+printf 'https://hc-ping.com/SECRET-token-file/{code}\n' > "$SBX/ping.file"
+( export PATH="$SBX/bin:$PATH" PING_URL_FILE="$SBX/ping.file"; unset PING_URL; send_ping success 0 ) > "$SBX/out" 2>&1
+eq "pinged resolved URL" "https://hc-ping.com/SECRET-token-file/0" "$(awk '{print $NF}' "$CURL_LOG")"
+eq "token not logged"    "0" "$(grep -c SECRET "$SBX/out")"
+
+echo "=== P13: PING_URL under /run/secrets but not mounted: no ping, a warning ==="
+: > "$CURL_LOG"
+( export PATH="$SBX/bin:$PATH" PING_URL="/run/secrets/no-existe-ping"; send_ping start ) > "$SBX/out" 2>&1
+eq "curl not called"   "0" "$(wc -c < "$CURL_LOG")"
+eq "warns not mounted" "1" "$(grep -c 'not mounted' "$SBX/out")"
 
 rm -rf "$SBX"
 echo

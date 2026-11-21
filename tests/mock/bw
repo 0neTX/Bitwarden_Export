@@ -4,7 +4,10 @@
 #   BW_REAL_PW    : the master password the *server* currently accepts
 #   BW_FAIL_CONFIG/BW_FAIL_LOGIN : force those subcommands to fail
 #   BW_FAIL_EXPORT : "personal" or an organization id whose export fails
+#   BW_FAIL_ATTACH_MSG: the error a failing attachment download prints instead
 #   BW_FAIL_LIST   : "organizations" or "items", a listing that fails
+#   BW_ORGS_JSON   : what "list organizations" prints (default: [])
+#   BW_DENY_EXPORT : an organization id the server refuses to export (a 401)
 #   BW_EXPORT_PWLOG: file that records, per export, the password the CLI received
 #   BW_EXPORT_NOFILE: "personal" or an organization id whose export exits 0 unwritten
 STATE="${BW_STATE:?}"
@@ -33,6 +36,12 @@ case "$1" in
 
   login)
     [ -n "$BW_FAIL_LOGIN" ] && { echo "mock: login failed" >&2; exit 1; }
+    # Like the real CLI with --apikey --nointeraction: the key comes from the
+    # environment, so a value the caller did not export is not there.
+    if [ -z "${BW_CLIENTID:-}" ] || [ -z "${BW_CLIENTSECRET:-}" ]; then
+      echo "client_id and client_secret are required." >&2; exit 1
+    fi
+    echo "APIKEY=$BW_CLIENTID:$BW_CLIENTSECRET" >> "$LOG"
     if [ "$auth" = 1 ]; then echo "You are already logged in" >&2; exit 1; fi
     auth=1; locked=1; cached_pw="${BW_REAL_PW:?}"; save; exit 0 ;;
 
@@ -57,6 +66,7 @@ case "$1" in
           auth=0; locked=1; cached_pw=""; server="https://vault.bitwarden.com"; save; exit 0 ;;
 
   list)
+    [ "$auth" = 1 ] || { echo "You are not logged in." >&2; exit 1; }
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
     # BW_FAIL_LIST names a listing (organizations, items) that fails the way it
     # does once a 401 has logged the CLI out.
@@ -64,6 +74,9 @@ case "$1" in
       echo "You are not logged in." >&2; exit 1
     fi
     # "list items --trash" is a different question; only the vault listing is seeded.
+    if [ "$2" = organizations ] && [ -n "${BW_ORGS_JSON:-}" ]; then
+      printf '%s\n' "$BW_ORGS_JSON"; exit 0
+    fi
     if [ "$2" = items ] && [ "$3" != --trash ] && [ -s "${BW_ITEMS_FILE:-}" ]; then
       cat "$BW_ITEMS_FILE"
     else
@@ -72,27 +85,45 @@ case "$1" in
     exit 0 ;;
 
   get)
-    # bw get attachment <fileName> --itemid <id> --output <dir>
+    # bw get attachment <id|fileName> --itemid <id> --output <dir/ or file>
+    # Like the real CLI: the attachment is found by its id, or by its fileName;
+    # an --output ending in / is a folder the file is saved into under the
+    # basename of its fileName, anything else is the file's own path.
     # Records argv verbatim so a test can prove nothing was shell-expanded.
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
     if [ "$2" = attachment ]; then
-      file="$3"
+      ref="$3"
       while [ $# -gt 0 ]; do
         case "$1" in --itemid) itemid="$2"; shift;; --output) out="$2"; shift;; esac
         shift
       done
+      file="$ref"
+      if [ -s "${BW_ITEMS_FILE:-}" ]; then
+        found=$(jq -r --arg i "$itemid" --arg r "$ref" \
+          'first(.[] | select(.id == $i) | (.attachments // [])[] | select(.id == $r or .fileName == $r) | .fileName) // empty' \
+          "$BW_ITEMS_FILE")
+        [ -n "$found" ] && file="$found"
+      fi
       printf 'ATTACHMENT\t%s\t%s\t%s\n' "$itemid" "$file" "$out" >> "${BW_ATTACHLOG:-/dev/null}"
       # BW_FAIL_ATTACH names a fileName whose download fails, the way it does
       # when a proxy answers /attachments/ with a login page: message, exit 1,
       # nothing written.
       if [ -n "${BW_FAIL_ATTACH:-}" ] && [ "$file" = "$BW_FAIL_ATTACH" ]; then
-        echo "An error occurred while saving the attachment." >&2
+        echo "${BW_FAIL_ATTACH_MSG:-An error occurred while saving the attachment.}" >&2
         exit 1
       fi
-      mkdir -p "$out" && printf 'attachment-content\n' > "$out/$file"
+      case "$out" in
+        */) path="$out${file##*/}" ;;
+        *)  path="$out" ;;
+      esac
+      # Content unique to the attachment, so a test can tell one overwriting another.
+      mkdir -p "$(dirname "$path")" && printf 'attachment %s of item %s\n' "$ref" "$itemid" > "$path"
+      # Like the real CLI: the confirmation has no trailing newline.
+      printf 'Saved %s' "$path"
     fi
     exit 0 ;;
   export)
+    [ "$auth" = 1 ] || { echo "You are not logged in." >&2; exit 1; }
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
     [ -n "$BW_SLOW_EXPORT" ] && sleep 5
     org=personal; pw=; prompt=
@@ -111,6 +142,14 @@ case "$1" in
       echo >&2
     fi
     printf '%s\t%s\n' "$org" "$pw" >> "${BW_EXPORT_PWLOG:-/dev/null}"
+    # BW_DENY_EXPORT names an organization the account may not export. The
+    # server answers 401 and the real CLI then logs itself out, so every later
+    # command fails with "You are not logged in."
+    if [ -n "${BW_DENY_EXPORT:-}" ] && [ "$org" = "$BW_DENY_EXPORT" ]; then
+      echo '{"response":{"error":{"code":401,"reason":"Unauthorized"}},"statusCode":401}' >&2
+      auth=0; locked=1; cached_pw=""; save
+      echo "You are not logged in." >&2; exit 1
+    fi
     # BW_FAIL_EXPORT names "personal" or an organization id whose export fails
     # the way the real CLI does on an unwritable folder: one line on stderr,
     # exit 1, nothing written.

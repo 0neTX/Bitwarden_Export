@@ -10,6 +10,7 @@
 # passed to shellcheck as an input of its own in ci.yml.
 # shellcheck disable=SC1091,SC2030,SC2031
 SP="$(cd "$(dirname "$0")" && pwd)"
+export LOG_LIB="$SP/../root/usr/local/lib/bw-export/log.sh"
 LIB="${LIB:-$SP/../root/usr/local/lib/bw-export/notify.sh}"
 SBX="$SP/sbx/notify"
 pass=0; fail=0
@@ -64,7 +65,7 @@ echo "=== N4: a failing service neither changes the status nor leaks the token =
 reset
 ( set -e; NOTIFICATION_URL="$URL" STUB_FAIL=1 send_message "boom"; echo "still running rc=$?" ) > "$SBX/out" 2>&1
 eq "returns 0, set -e survives" "still running rc=0" "$(tail -n 1 "$SBX/out")"
-eq "warns"                      "1" "$(grep -c 'sending the notification failed' "$SBX/out")"
+eq "warns"                      "1" "$(grep -c 'Sending the notification failed' "$SBX/out")"
 eq "error text with the token dropped" "0" "$(grep -c SECRET "$SBX/out")"
 
 echo "=== N5: an empty message is replaced, since Telegram rejects one ==="
@@ -77,6 +78,73 @@ reset
 msg=$'line one\nline "two" $HOME `x`\n'
 ( NOTIFICATION_URL="$URL" send_message "$msg" ) > "$SBX/out" 2>&1
 eq "verbatim" "${msg}x" "$(cat "$SBX/message"; printf x)"
+
+echo "=== N7: NOTIFICATION_URL as a file path (with trailing newline) ==="
+reset
+printf '%s\n' "$URL" > "$SBX/notif.secret"
+( NOTIFICATION_URL="$SBX/notif.secret" send_message "from file" ) > "$SBX/out" 2>&1
+eq "URL resolved in SHOUTRRR_URL" "$URL" "$(cat "$SBX/envurl")"
+eq "token not in argv"            "0"    "$(grep -c SECRET "$SBX/argv")"
+eq "token not logged"             "0"    "$(grep -c SECRET "$SBX/out")"
+
+echo "=== N8: NOTIFICATION_URL pointing to an empty file does not notify and warns ==="
+reset
+: > "$SBX/empty.secret"
+( NOTIFICATION_URL="$SBX/empty.secret" send_message "skip" ) > "$SBX/out" 2>&1
+eq "shoutrrr not run" "no" "$([ -e "$SBX/argv" ] && echo yes || echo no)"
+eq "warns empty file" "1"  "$(grep -c 'empty file' "$SBX/out")"
+
+echo "=== N9: NOTIFICATION_URL pointing to an unreadable file does not notify and warns ==="
+reset
+printf '%s\n' "$URL" > "$SBX/unreadable.secret"
+chmod 000 "$SBX/unreadable.secret"
+if [ "$(id -u)" -ne 0 ]; then
+  ( NOTIFICATION_URL="$SBX/unreadable.secret" send_message "skip" ) > "$SBX/out" 2>&1
+  eq "shoutrrr not run" "no" "$([ -e "$SBX/argv" ] && echo yes || echo no)"
+  eq "warns unreadable" "1"  "$(grep -c 'cannot be read' "$SBX/out")"
+else
+  echo "  SKIP  2 assertions: root reads any file, so it cannot be made unreadable"
+fi
+chmod 600 "$SBX/unreadable.secret"
+
+echo "=== N11: NOTIFICATION_URL_FILE is read ==="
+reset
+printf '%s\n' "$URL" > "$SBX/notif.file"
+( unset NOTIFICATION_URL; NOTIFICATION_URL_FILE="$SBX/notif.file" send_message "via _FILE" ) > "$SBX/out" 2>&1
+eq "URL resolved in SHOUTRRR_URL" "$URL" "$(cat "$SBX/envurl")"
+eq "token not logged"             "0"    "$(grep -c SECRET "$SBX/out")"
+
+echo "=== N10: NOTIFICATION_URL under /run/secrets but not mounted: no send, a warning ==="
+reset
+( NOTIFICATION_URL="/run/secrets/no-existe-notif" send_message "missing" ) > "$SBX/out" 2>&1
+eq "shoutrrr not run"  "no" "$([ -e "$SBX/argv" ] && echo yes || echo no)"
+eq "warns not mounted" "1"  "$(grep -c 'not mounted' "$SBX/out")"
+
+echo "=== N12: NOTIFICATION_LEVEL says which outcomes are wanted ==="
+lvl() { ( unset NOTIFICATION_LEVEL; [ "$#" -gt 0 ] && export NOTIFICATION_LEVEL="$1"; notify_level ); }
+want() { ( unset NOTIFICATION_LEVEL; [ "$2" != "<unset>" ] && export NOTIFICATION_LEVEL="$2"; notify_wanted "$1" && echo yes || echo no ); }
+eq "unset is all"            "all"     "$(lvl)"
+eq "empty is all"            "all"     "$(lvl '')"
+eq "all"                     "all"     "$(lvl all)"
+eq "failure"                 "failure" "$(lvl failure)"
+eq "case and spaces ignored" "failure" "$(lvl '  FAILURE ')"
+eq "a typo is all"           "all"     "$(lvl failures)"
+eq "start, unset"            "yes"     "$(want start '<unset>')"
+eq "success, all"            "yes"     "$(want success all)"
+eq "start, failure"          "no"      "$(want start failure)"
+eq "success, failure"        "no"      "$(want success failure)"
+eq "failure, failure"        "yes"     "$(want failure failure)"
+eq "failure, all"            "yes"     "$(want failure all)"
+eq "success, a typo"         "yes"     "$(want success failures)"
+
+echo "=== N13: only a value that is neither all nor failure warns ==="
+warn() { ( unset NOTIFICATION_LEVEL; [ "$#" -gt 0 ] && export NOTIFICATION_LEVEL="$1"; notify_level_warning ); }
+eq "unset: silent"   "0" "$(warn | grep -c Warning)"
+eq "empty: silent"   "0" "$(warn '' | grep -c Warning)"
+eq "all: silent"     "0" "$(warn all | grep -c Warning)"
+eq "FAILURE: silent" "0" "$(warn FAILURE | grep -c Warning)"
+eq "a typo warns"    "1" "$(warn errors | grep -c 'NOTIFICATION_LEVEL must be all or failure, not "errors"')"
+eq "and says all"    "1" "$(warn errors | grep -c 'Sending every notification')"
 
 echo
 echo "PASS=$pass FAIL=$fail"
