@@ -284,6 +284,15 @@ if [[ "${1:-}" == "--run-once" ]]; then
     run_once
 fi
 
+# The project's logo, once per container start (not on every scheduled run,
+# which re-enters this script with --run-once and never gets here).
+echo " _                                             _   ";
+echo "| |____      __      _____  ___ __   ___  _ __| |_ ";
+echo "| '_ \ \ /\ / /____ / _ \ \/ / '_ \ / _ \| '__| __|";
+echo "| |_) \ V  V /_____|  __/>  <| |_) | (_) | |  | |_ ";
+echo "|_.__/ \_/\_/       \___/_/\_\ .__/ \___/|_|   \__|";
+echo "                             |_|                   ";
+
 if [[ "$ENTRYPOINT_UID" -eq 0 ]]; then
     "$ADDUSER_BIN"
 else
