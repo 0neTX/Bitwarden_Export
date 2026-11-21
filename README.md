@@ -677,7 +677,7 @@ What changes when the container does not start as root:
 Each line is `<date> <time> LEVEL: message`, where the level is `INFO`, `WARNING`, `ERROR`, or `HINT` (what to do about the line above). The first lines of every run say what it is about to do, which is what a support request needs before anything else:
 
 ```text
-2026-11-20 17:54:10 INFO: bw-export 1.12, Bitwarden CLI 2026.11.0
+2026-11-20 17:54:10 INFO: bw-export 2.00, Bitwarden CLI 2026.11.0
 2026-11-20 17:54:10 INFO: Mode: one backup, then exit, timezone UTC
 2026-11-20 17:54:10 INFO: Runs as uid 1000, gid 1000
 2026-11-20 17:54:10 INFO: Vaults: one; notifications: on; monitoring ping: off; Infisical: off; log file: on
@@ -705,9 +705,22 @@ Messages from the Bitwarden CLI itself appear indented under the error they expl
 | Exported files belong to `root`, or to nobody you recognise | Set `PUID`/`PGID`; under rootless Podman add `compose.podman.yml`. See [PUID and PGID](#file-ownership-puid-and-pgid). |
 | The log disappears with the container | Point `FILE_LOG` inside a mounted volume. |
 | No notification arrives | A failed notification is logged without the address and does not change the exit code. Check the log and the Shoutrrr URL. |
-| `Saved …` lines with item and file names are gone | From the release after 1.12, the log names no attachment: it says how many were saved, and names a failed one by its position and item ID. |
+| `Saved …` lines with item and file names are gone | Since 2.00 the log names no attachment: it says how many were saved, and names a failed one by its position and item ID. |
 
 ## Upgrade notes
+
+### Upgrading to 2.00
+
+Every setting from 1.12 keeps its meaning, so most setups only need `docker compose pull` and a restart. Check these if they apply to you:
+
+- **You use Gotify notifications:** see [Notifications: Shoutrrr 0.25](#notifications-shoutrrr-025). A self-signed certificate now needs `skiptlsverify=yes`, and only application tokens work.
+- **You read or parse the container log:** every line is now `<date> <time> LEVEL: message` (see [Reading the log](#reading-the-log)). The run ends with `Run finished with exit code N` instead of `Return Code: N`. The log no longer names attachments, organizations or the server.
+- **You set `CRON`:** it must be a schedule only, i.e. 5 to 7 fields or a macro. Anything after the schedule stops the container at start; supercronic never accepted `@every` either.
+- **You have items with the same name:** their attachments now go to separate folders, `Passport (1a2b3c4d)`, instead of overwriting each other. Unique names keep their folders.
+- **You belong to organizations you do not own or administer:** they are skipped now; see [below](#organizations-you-do-not-own-or-administer).
+- **Self-hosted:** Vaultwarden 1.37.4 or later, as in 1.12.
+
+New and optional: [several vaults](#several-vaults) in one container, `CRON` scheduling, [encrypted attachments](#encrypted-attachments), [GFS retention](#retention), [`BACKUP_PERMISSIONS`](#permissions-of-the-backups), `NOTIFICATION_LEVEL`, `*_FILE` for every secret, and a [hardened profile](#hardened-setup).
 
 ### Notifications: Shoutrrr 0.25
 
