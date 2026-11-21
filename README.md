@@ -179,6 +179,7 @@ Every run writes a dated folder, `<DateTime>-bw-export`, into the output path:
 - a JSON file with your **personal vault** (password-encrypted when `EXPORT_PASSWORD` is set — recommended),
 - a JSON file per **organization vault**, if you export any,
 - a folder with your **attachments**, one subfolder per vault item, or a single `attachments.tar.gz.gpg` when `ENCRYPT_ATTACHMENTS` is on.
+  Each subfolder is named after its item. Items that share a name get their short ID appended, `Passport (1a2b3c4d)`, and so do attachments that share a name within an item, `scan (9f8e7d6c).pdf`, so that none overwrites another. Names are compared ignoring case, as on Windows and macOS.
 
 The log ends with a summary of the run, which is also what the [notification](#notifications) carries:
 
