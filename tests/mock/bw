@@ -84,15 +84,25 @@ case "$1" in
     exit 0 ;;
 
   get)
-    # bw get attachment <fileName> --itemid <id> --output <dir>
+    # bw get attachment <id|fileName> --itemid <id> --output <dir/ or file>
+    # Like the real CLI: the attachment is found by its id, or by its fileName;
+    # an --output ending in / is a folder the file is saved into under the
+    # basename of its fileName, anything else is the file's own path.
     # Records argv verbatim so a test can prove nothing was shell-expanded.
     [ "$locked" = 0 ] || { echo "Vault is locked." >&2; exit 1; }
     if [ "$2" = attachment ]; then
-      file="$3"
+      ref="$3"
       while [ $# -gt 0 ]; do
         case "$1" in --itemid) itemid="$2"; shift;; --output) out="$2"; shift;; esac
         shift
       done
+      file="$ref"
+      if [ -s "${BW_ITEMS_FILE:-}" ]; then
+        found=$(jq -r --arg i "$itemid" --arg r "$ref" \
+          'first(.[] | select(.id == $i) | (.attachments // [])[] | select(.id == $r or .fileName == $r) | .fileName) // empty' \
+          "$BW_ITEMS_FILE")
+        [ -n "$found" ] && file="$found"
+      fi
       printf 'ATTACHMENT\t%s\t%s\t%s\n' "$itemid" "$file" "$out" >> "${BW_ATTACHLOG:-/dev/null}"
       # BW_FAIL_ATTACH names a fileName whose download fails, the way it does
       # when a proxy answers /attachments/ with a login page: message, exit 1,
@@ -101,9 +111,14 @@ case "$1" in
         echo "An error occurred while saving the attachment." >&2
         exit 1
       fi
-      mkdir -p "$out" && printf 'attachment-content\n' > "$out/$file"
+      case "$out" in
+        */) path="$out${file##*/}" ;;
+        *)  path="$out" ;;
+      esac
+      # Content unique to the attachment, so a test can tell one overwriting another.
+      mkdir -p "$(dirname "$path")" && printf 'attachment %s of item %s\n' "$ref" "$itemid" > "$path"
       # Like the real CLI: the confirmation has no trailing newline.
-      printf 'Saved %s' "${out%/}/$file"
+      printf 'Saved %s' "$path"
     fi
     exit 0 ;;
   export)

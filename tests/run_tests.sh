@@ -975,6 +975,29 @@ else
   done
 fi
 
+
+echo "=== T60: same-named items and attachments never overwrite each other ==="
+setup ""
+# Two items named alike (ignoring case, as NTFS does) shared one folder, and two
+# attachments named alike overwrote each other, both counted as saved. Two
+# attachments with one name in one item made both downloads fail.
+export BW_REAL_PW=correct-pw BW_ATTACHLOG="$SP/sbx/attach"
+printf '%s' '[{"id":"aaaaaaaa-1","name":"Passport","attachments":[{"id":"a1aaaaaa-x","fileName":"scan.pdf"}]},
+ {"id":"bbbbbbbb-2","name":"passport","attachments":[{"id":"b1bbbbbb-x","fileName":"scan.pdf"}]},
+ {"id":"cccccccc-3","name":"Dups","attachments":[{"id":"c1cccccc-x","fileName":"dup.txt"},{"id":"c2cccccc-x","fileName":"dup.txt"},{"id":"c3cccccc-x","fileName":"other"}]},
+ {"id":"dddddddd-4","name":"Unique","attachments":[{"id":"d1dddddd-x","fileName":"README"}]}]' > "$SP/sbx/items.json"
+export BW_ITEMS_FILE="$SP/sbx/items.json"
+rc=$(run)
+att=$(compgen -G "$SP/sbx/att/*-bw-export" | head -n 1)
+check "exit 0" "$([ "$rc" = 0 ]; echo $?)" "rc=$rc; $(grep -iE 'error|warning' "$SP/sbx/output")"
+check "six files for six attachments" "$([ "$(find "$att" -type f | wc -l)" = 6 ]; echo $?)" "$(cd "$att" && find . -type f)"
+check "each item named alike has its own folder" "$([ -f "$att/Passport (aaaaaaaa)/scan.pdf" ] && [ -f "$att/passport (bbbbbbbb)/scan.pdf" ]; echo $?)" "$(cd "$att" && find . -type f)"
+check "neither overwrote the other" "$(grep -q 'of item aaaaaaaa-1' "$att/Passport (aaaaaaaa)/scan.pdf" && grep -q 'of item bbbbbbbb-2' "$att/passport (bbbbbbbb)/scan.pdf"; echo $?)" "$(cat "$att"/*/scan.pdf)"
+check "attachments named alike in one item are both kept" "$([ -f "$att/Dups/dup (c1cccccc).txt" ] && [ -f "$att/Dups/dup (c2cccccc).txt" ]; echo $?)" "$(cd "$att" && find . -type f)"
+check "unique names keep their plain paths" "$([ -f "$att/Dups/other" ] && [ -f "$att/Unique/README" ]; echo $?)" "$(cd "$att" && find . -type f)"
+check "every attachment asked for by its ID" "$([ "$(grep -c $'^ATTACHMENT\t' "$SP/sbx/attach")" = 6 ] && ! grep -q 'get attachment scan.pdf\|get attachment dup.txt' "$SP/sbx/calls"; echo $?)" "$(grep '^bw get attachment' "$SP/sbx/calls")"
+check "summary counts six" "$(grep -q '^Attachments: 6 saved, 0 failed (unencrypted)$' "$SP/sbx/output"; echo $?)" "$(grep '^Attachments' "$SP/sbx/output")"
+
 echo
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" = 0 ]
