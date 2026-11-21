@@ -174,6 +174,24 @@ eq "exit 1"                "1" "$rc"
 eq "no backup attempted"   "0" "$(grep -c '^bw_export:' "$SBX/calls")"
 eq "error message printed" "1" "$(grep -c 'ERROR: Invalid CRON expression' "$SBX/stdout")"
 
+echo "=== C4b: a CRON value carrying a command is refused before any crontab is written ==="
+# The stub supercronic accepts everything, as the real one does with a command
+# after five valid fields: only the entrypoint's own check stands in the way.
+for bad in "* * * * * touch $SBX/pwned #" "@daily touch $SBX/pwned" "0 3 * * *
+* * * * * touch $SBX/pwned"; do
+  reset
+  rc=$(CRON="$bad" run_entry)
+  eq "[$(printf %q "${bad%% *}")...] exit 1"           "1" "$rc"
+  eq "[$(printf %q "${bad%% *}")...] says why"         "1" "$(grep -c 'ERROR: Invalid CRON expression' "$SBX/stdout")"
+  eq "[$(printf %q "${bad%% *}")...] no crontab"       "0" "$(test -e "$SBX/crontab" && echo 1 || echo 0)"
+  eq "[$(printf %q "${bad%% *}")...] nothing ran"      "0" "$(grep -c '^bw_export:' "$SBX/calls"; test -e "$SBX/pwned" && echo pwned)"
+done
+for good in "0 3 * * mon-fri" "@daily" "0 30 3 * * *"; do
+  reset
+  rc=$(CRON="$good" BW_EXPORT_TAG=startup run_entry)
+  eq "[$good] accepted: supercronic started" "1" "$(grep -c "^supercronic $SBX/crontab$" "$SBX/calls")"
+done
+
 echo "=== C5: startup backup failing in CRON mode still starts supercronic ==="
 reset
 rc=$(CRON="0 3 * * *" BW_EXPORT_RC=1 BW_EXPORT_TAG=startup run_entry)

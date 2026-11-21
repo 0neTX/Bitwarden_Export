@@ -312,9 +312,23 @@ fi
 
 # Cron mode: validate the schedule first so a typo fails fast, run an initial
 # backup right away, and hand PID 1 over to supercronic.
+# CRON is written into a crontab line ahead of the command, so anything after
+# the schedule would be run as part of it, as root: "* * * * * touch x #" passes
+# supercronic's own check and runs "touch x" every minute. Only a schedule is
+# let through: a macro, or 5 to 7 fields of digits, cron punctuation and the
+# three-letter month and day names. supercronic then checks the schedule.
+cron_field='([0-9*?#/,LW-]|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|SUN|MON|TUE|WED|THU|FRI|SAT)+'
+cron_pattern="^(@(YEARLY|ANNUALLY|MONTHLY|WEEKLY|DAILY|MIDNIGHT|HOURLY)|${cron_field}([ ]+${cron_field}){4,6})$"
+cron_value=${CRON^^}
+if [[ $CRON == *$'\n'* ]] || ! [[ ${cron_value//$'\t'/ } =~ $cron_pattern ]]; then
+    log_error "Invalid CRON expression: $CRON" >&2
+    log_hint "Use 5 fields such as \"0 3 * * *\", or a macro such as @daily." >&2
+    exit 1
+fi
 printf '%s bash %q --run-once\n' "$CRON" "$0" > "$CRONTAB_FILE"
 if ! "$SUPERCRONIC_BIN" -test "$CRONTAB_FILE"; then
     log_error "Invalid CRON expression: $CRON" >&2
+    log_hint "Use 5 fields such as \"0 3 * * *\", or a macro such as @daily." >&2
     exit 1
 fi
 
