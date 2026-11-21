@@ -84,7 +84,7 @@ FROM ubuntu:24.04@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451
 # The image's own version. ARG so a release build can stamp it
 # (--build-arg IMAGE_VERSION=...), with the pinned value as the default, the
 # same way BW_CLI_VERSION and SHOUTRRR_VERSION do below.
-ARG IMAGE_VERSION="1.12"
+ARG IMAGE_VERSION="2.00"
 
 # Both sets of keys on purpose. "description" and "version" are what this image
 # has always published. The org.opencontainers.image.* ones are the standard

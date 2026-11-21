@@ -65,7 +65,7 @@ body:
         `bw-export <version>` line to the final `Run finished with exit code`
         line. Its first lines already give the versions, the mode and the
         settings in use, so the configuration below is rarely needed. Since
-        the release after 1.12 the log carries no password, key, token, server address or name
+        2.00 the log carries no password, key, token, server address or name
         from your vault; with older versions, redact those before pasting.
       render: shell
     validations:
