@@ -37,9 +37,10 @@ LABEL org.opencontainers.image.base.name="docker.io/library/ubuntu:24.04"
 # inherited: :latest reports ref.name=ubuntu to this day.
 LABEL org.opencontainers.image.ref.name="bw-export"
 
-# Not declared here on purpose: created, revision and base.digest are build-time
-# facts, and a hardcoded value for any of them would simply be false. They need
-# to be stamped by the workflow.
+# Not declared here on purpose: created and revision are build-time facts, and a
+# hardcoded value for either would simply be false; they need to be stamped by
+# the workflow. base.digest is left out too: the digest is pinned in the FROM
+# above, and a copy here would go stale every time Dependabot bumps that FROM.
 
 # Create a volume for storing vault exporting data
 VOLUME /var/data
