@@ -10,6 +10,9 @@ jobs:
       # bitwarden/clients releases cli-, desktop-, browser- and web- from the
       # same repo, and "the latest release" is usually not the CLI: the previous
       # step tagged an image :web-v2026.8.0. Ask for the newest cli- one.
+      # The Dockerfile verifies the zip against BW_CLI_SHA256, so its digest is
+      # resolved too, from the asset the Dockerfile downloads: bw-bit-linux,
+      # or bw-linux for releases before the rename.
       - id: bitwardencli
         name: Resolve latest Bitwarden CLI release
         env:
@@ -20,8 +23,19 @@ jobs:
             --jq '[.[] | select(.draft == false and .prerelease == false)
                        | select(.tag_name | startswith("cli-v"))][0].tag_name')
           if [ -z "$tag" ]; then echo "no cli- release found" >&2; exit 1; fi
-          echo "version=${tag#cli-v}" >> "$GITHUB_OUTPUT"
-          echo "Resolved $tag"
+          version=${tag#cli-v}
+          # Checked before it goes into the jq filter below (gh api --jq takes
+          # no --arg), and into a build argument.
+          if ! [[ $version =~ ^[0-9]+(\.[0-9]+)+$ ]]; then echo "unexpected CLI version: $version" >&2; exit 1; fi
+          digest=$(gh api "repos/bitwarden/clients/releases/tags/$tag" --jq \
+            "[.assets[] | select(.name == \"bw-bit-linux-$version.zip\")] + [.assets[] | select(.name == \"bw-linux-$version.zip\")] | .[0].digest // empty")
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "no sha256 digest for the CLI zip of $tag" >&2; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha256=${digest#sha256:}" >> "$GITHUB_OUTPUT"
+          echo "Resolved $tag (${digest})"
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -44,4 +58,5 @@ jobs:
           # whatever the Dockerfile had pinned.
           build-args: |
             BW_CLI_VERSION=${{ steps.bitwardencli.outputs.version }}
+            BW_CLI_SHA256=${{ steps.bitwardencli.outputs.sha256 }}
           tags: 0netx/bw-export:beta, 0netx/bw-export:${{ steps.bitwardencli.outputs.version }}
