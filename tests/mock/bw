@@ -4,6 +4,7 @@
 #   BW_REAL_PW    : the master password the *server* currently accepts
 #   BW_FAIL_CONFIG/BW_FAIL_LOGIN : force those subcommands to fail
 #   BW_FAIL_EXPORT : "personal" or an organization id whose export fails
+#   BW_FAIL_ATTACH_MSG: the error a failing attachment download prints instead
 #   BW_FAIL_LIST   : "organizations" or "items", a listing that fails
 #   BW_ORGS_JSON   : what "list organizations" prints (default: [])
 #   BW_DENY_EXPORT : an organization id the server refuses to export (a 401)
@@ -108,7 +109,7 @@ case "$1" in
       # when a proxy answers /attachments/ with a login page: message, exit 1,
       # nothing written.
       if [ -n "${BW_FAIL_ATTACH:-}" ] && [ "$file" = "$BW_FAIL_ATTACH" ]; then
-        echo "An error occurred while saving the attachment." >&2
+        echo "${BW_FAIL_ATTACH_MSG:-An error occurred while saving the attachment.}" >&2
         exit 1
       fi
       case "$out" in

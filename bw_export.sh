@@ -547,6 +547,7 @@ if [[ $attachments_total -gt 0 ]]; then
     # is enough to find it in the vault without naming it.
     attachment_index=0
     attachment_err=$(mktemp)
+    attachments_undecryptable=0
     while IFS=$'\t' read -r item_id attachment_ref output_path; do
         attachment_index=$((attachment_index + 1))
         rc=0
@@ -555,6 +556,11 @@ if [[ $attachments_total -gt 0 ]]; then
             attachments_failed=$((attachments_failed + 1))
             log_warn "Attachment $attachment_index of $attachments_total (item $item_id) could not be saved."
             cli_said "$attachment_err"
+            # What a login page or an HTML error does to the CLI: it downloads
+            # something, then fails to decrypt or save it.
+            if grep -qiE 'decrypt|error occurred while saving' "$attachment_err"; then
+                attachments_undecryptable=$((attachments_undecryptable + 1))
+            fi
         else
             attachments_saved=$((attachments_saved + 1))
         fi
@@ -584,7 +590,13 @@ if [[ $attachments_total -gt 0 ]]; then
     rm -f "$attachment_err"
     if [[ $attachments_failed -gt 0 ]]; then
         log_error "$attachments_failed attachment(s) could not be saved."
-        log_hint "A reverse proxy that intercepts /attachments/ is a common cause: the CLI is handed a login page and cannot decrypt it. Check that path is reachable."
+        # Only when the CLI said it could not decrypt or save what it got: for
+        # any other failure this hint pointed the wrong way.
+        if [[ $attachments_undecryptable -gt 0 ]]; then
+            log_hint "The CLI could not decrypt or save what it downloaded. A reverse proxy that intercepts /attachments/ and answers with a login page is a common cause: check that path is reachable."
+        else
+            log_hint "The Bitwarden CLI's own message is under each warning above."
+        fi
     fi
     log_info "Attachments: $attachments_saved saved, $attachments_failed failed."
     # What was saved is encrypted even when some downloads failed: a partial

@@ -544,7 +544,11 @@ check "no item or file name in the log" "$(! grep -qE 'Jane|Passport|12345678Z|b
 check "counts instead" "$(grep -q 'Saving 3 attachment(s) from 2 item(s)' "$SP/sbx/output" && grep -q 'Attachments: 3 saved, 0 failed\.$' "$SP/sbx/output"; echo $?)" "$(grep -i attach "$SP/sbx/output")"
 rc=$(export BW_FAIL_ATTACH=b.txt; run)
 check "a failed one is counted" "$([ "$rc" = 1 ] && grep -q '1 attachment(s) could not be saved' "$SP/sbx/output"; echo $?)" "$(grep -i 'attach' "$SP/sbx/output")"
+check "the CLI's message under the warning" "$(grep -A1 'Attachment 2 of 3' "$SP/sbx/output" | grep -q '^    bw: An error occurred while saving the attachment\.$'; echo $?)" "$(grep -A1 'Attachment 2 of 3' "$SP/sbx/output")"
+check "the proxy hint, since the CLI could not save it" "$(grep -q 'HINT: The CLI could not decrypt or save' "$SP/sbx/output"; echo $?)" "$(grep HINT "$SP/sbx/output")"
 check "and named by position and item ID only" "$(grep -q 'Attachment 2 of 3 (item i1) could not be saved' "$SP/sbx/output" && ! grep -q 'b\.txt' "$SP/sbx/output"; echo $?)" "$(grep -i 'attachment 2' "$SP/sbx/output")"
+rc=$(export BW_FAIL_ATTACH=b.txt BW_FAIL_ATTACH_MSG="Not found."; run)
+check "another cause: no proxy hint, the CLI's message instead" "$([ "$rc" = 1 ] && grep -q '^    bw: Not found\.$' "$SP/sbx/output" && ! grep -q 'reverse proxy' "$SP/sbx/output" && grep -q "HINT: The Bitwarden CLI's own message is under each warning above" "$SP/sbx/output"; echo $?)" "$(grep -E 'bw:|HINT' "$SP/sbx/output")"
 
 echo "=== T41: an EXPORT_PASSWORD that yields no password never exports unencrypted ==="
 # A folder is what Docker makes of a bind-mounted secret file that does not
