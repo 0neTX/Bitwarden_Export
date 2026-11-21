@@ -570,6 +570,9 @@ docker create ... -e PUID=1000 -e PGID=1000 ...
 
 Use your own ids, which `id $user` reports as `uid` and `gid`.
 
+> [!TIP]
+> **Set them even if root-owned files do not bother you.** Without `PUID`, the export itself runs as root: the Bitwarden CLI, which handles your master password, then has root's access to everything mounted in the container. With `PUID`/`PGID` it runs as that user and can write only to the backup folders and its own data folder. For a container that stays up with `CRON`, the [hardened setup](#hardened-setup) goes further: it never starts as root at all.
+
 ### Rootless Podman
 
 Rootless Podman maps the container's uids onto your subordinate uid range, so `PUID=1000` inside the container is **not** uid 1000 on the host: exports end up owned by an unknown user, or cannot be written at all. Add the [`compose.podman.yml`](compose.podman.yml) override, which uses `keep-id` so your uid means the same inside and outside the container:
@@ -734,6 +737,14 @@ Bug reports: [open an issue](https://github.com/0neTX/Bitwarden_Export/issues/ne
 ## Security
 
 To report a vulnerability, follow [SECURITY.md](SECURITY.md). Please do not open a public issue for one.
+
+Running it safely:
+
+- **Do not run the export as root.** Set [`PUID`/`PGID`](#file-ownership-puid-and-pgid), or use the [hardened setup](#hardened-setup), which never starts as root.
+- **Keep secrets out of the compose file.** Use the `_FILE` variables with [Docker secrets](#option-a-docker-secrets) (including `INFISICAL_TOKEN_FILE`), or [Infisical](#option-b-infisical); values in `environment:` are visible to anyone who can run `docker inspect`.
+- **Encrypt what you store.** Set `EXPORT_PASSWORD` and `ENCRYPT_ATTACHMENTS=true`, and keep that password somewhere other than Bitwarden.
+- **Restrict who can read the backups** on a shared host with `BACKUP_PERMISSIONS=private`.
+- **The log is safe to share:** it never contains secrets, server addresses or names from your vault (see [Reading the log](#reading-the-log)).
 
 ## Credits
 
