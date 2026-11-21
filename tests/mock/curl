@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The unit suites never reach the network. bw_export.sh only calls curl to read a
+# self-hosted server's version for the log (server_label in log.sh), so this
+# fails the way an unreachable server does, at once.
+exit 7

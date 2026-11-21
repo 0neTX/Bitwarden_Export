@@ -5,6 +5,7 @@
 # runs without root, network or containers.
 # shellcheck disable=SC2030,SC2031
 SP="$(cd "$(dirname "$0")" && pwd)"
+export LOG_LIB="$SP/../root/usr/local/lib/bw-export/log.sh"
 ENTRY="${ENTRY:-$SP/../entrypoint.sh}"
 SBX="$SP/sbx/cron"
 pass=0; fail=0
@@ -225,7 +226,7 @@ rc=$(unset CRON; ENTRYPOINT_UID_TEST=1000 RUN_AS_USER_TEST=no-such-user run_entr
 eq "exit 0"                     "0" "$rc"
 eq "adduser not run"            "0" "$(grep -c '^adduser$' "$SBX/calls")"
 eq "export ran, without su"     "1" "$(grep -c '^bw_export:run$' "$SBX/calls")"
-eq "says why"                   "1" "$(grep -c 'Running as uid 1000' "$SBX/stdout")"
+eq "says why"                   "1" "$(grep -c 'Started as uid 1000' "$SBX/stdout")"
 eq "no PUID warning unasked"    "0" "$(grep -c 'PUID and PGID are ignored' "$SBX/stdout")"
 reset
 rc=$(unset CRON; ENTRYPOINT_UID_TEST=1000 PUID=1000 PGID=1000 run_entry)
@@ -263,7 +264,7 @@ reset
 rc=$(unset CRON; NOTIFICATION_LEVEL=failure NOTIFICATION_URL=$N run_entry)
 eq "success: exit 0"                  "0" "$rc"
 eq "success: nothing sent"            "0" "$(notifies)"
-eq "success: the log says why"        "1" "$(grep -c 'Notifications enabled (failures only)' "$SBX/stdout")"
+eq "success: the log says why"        "1" "$(grep -c 'notifications: failures only' "$SBX/stdout")"
 reset
 rc=$(unset CRON; NOTIFICATION_LEVEL=failure NOTIFICATION_URL=$N BW_EXPORT_RC=1 run_entry)
 eq "failure: exit 1"                  "1" "$rc"

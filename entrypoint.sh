@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 ADDUSER_BIN="${ADDUSER_BIN:-/etc/cont-init.d/10-adduser}"
+LOG_LIB="${LOG_LIB:-/usr/local/lib/bw-export/log.sh}"
 PING_LIB="${PING_LIB:-/usr/local/lib/bw-export/ping.sh}"
 NOTIFY_LIB="${NOTIFY_LIB:-/usr/local/lib/bw-export/notify.sh}"
 BW_EXPORT_SCRIPT="${BW_EXPORT_SCRIPT:-/app/bw_export.sh}"
@@ -13,8 +14,6 @@ FILE_LOG_MAX_BYTES="${FILE_LOG_MAX_BYTES:-104857600}"
 ENTRYPOINT_UID="${ENTRYPOINT_UID:-$(id -u)}"
 APP_DIR="${APP_DIR:-/app}"
 
-Yellow='\033[0;33m'       # Yellow
-Cyan='\033[0;36m'         # Cyan
 
 # Started as a user other than root (compose "user: 1000:1000"): there is no
 # user to switch to, and no permission to create one, so the export runs as
@@ -46,9 +45,38 @@ fi
 # switch. Deliberately independent of NOTIFICATION_URL: one tells a person, the
 # other tells a machine, and neither is consulted to decide the other.
 # shellcheck disable=SC1090
+. "$LOG_LIB"
+# shellcheck disable=SC1090
 . "$PING_LIB"
 # shellcheck disable=SC1090
 . "$NOTIFY_LIB"
+
+# The first lines of every run: what a support request needs before anything
+# else. Versions, mode and who the export runs as, and which optional features
+# are on, by name only: no URL, token or path that could identify a server.
+run_header() {
+    local run_uid run_gid
+    if [[ -n "$RUN_AS_USER" ]] && id "$RUN_AS_USER" >/dev/null 2>&1; then
+        run_uid=$(id -u "$RUN_AS_USER"); run_gid=$(id -g "$RUN_AS_USER")
+    else
+        run_uid=$(id -u); run_gid=$(id -g)
+    fi
+    log_info "bw-export ${BW_EXPORT_VERSION:-unknown}, Bitwarden CLI ${BW_CLI_VERSION:-unknown}"
+    if [[ -n "${CRON:-}" ]]; then
+        log_info "Mode: scheduled (CRON=$CRON), timezone ${TZ:-UTC}"
+    else
+        log_info "Mode: one backup, then exit, timezone ${TZ:-UTC}"
+    fi
+    log_info "Runs as uid $run_uid, gid $run_gid"
+    local notifications="off" ping="off" infisical="off" vaults="one"
+    if [[ -n "$(resolve_secret NOTIFICATION_URL 2>/dev/null)" ]]; then
+        if [[ "$(notify_level)" == failure ]]; then notifications="failures only"; else notifications="on"; fi
+    fi
+    [[ -n "$(resolve_secret PING_URL 2>/dev/null)" ]] && ping="on"
+    [[ -n "${INFISICAL_TOKEN:-}" ]] && infisical="on"
+    [[ -n "${BW_VAULTS:-}" ]] && vaults="several (BW_VAULTS)"
+    log_info "Vaults: $vaults; notifications: $notifications; monitoring ping: $ping; Infisical: $infisical; log file: $([[ -n "${FILE_LOG:-}" ]] && echo on || echo off)"
+}
 
 run_once() {
     local run_log
@@ -102,12 +130,8 @@ $tail_lines"
 
     # Resolved, not just set: a secret file that is empty or not mounted sends
     # nothing. Its warning comes from send_message, so it is not repeated here.
+    run_header
     if [[ -n "$(resolve_secret NOTIFICATION_URL 2>/dev/null)" ]]; then
-        if [[ "$(notify_level)" == failure ]]; then
-            echo -e "\n${Cyan}Notifications enabled (failures only)."
-        else
-            echo -e "\n${Cyan}Notifications enabled."
-        fi
         notify_level_warning
     fi
     if notify_wanted start; then
@@ -138,11 +162,20 @@ $tail_lines"
             infisicalpath="--path=${INFISICAL_PATH}"
             infisical_args=("$infisicalpath")
         fi
-        echo -e "\n${Yellow}Infisical enabled! "
-        #Run this command to test connection with Infiscal
-        infisical_output=$(infisical run "${infisical_args[@]}" --command="echo BW_CLIENTID:$BW_CLIENTID" 2>&1)
+        log_info "Checking that Infisical can provide the secrets..."
+        # The command run inside Infisical prints nothing: with a secret in its
+        # output (the old check echoed BW_CLIENTID) the log would carry it.
+        # Infisical's own output is shown only when the check fails, and its
+        # errors name the token or path problem, never a secret's value.
+        infisical_output=$(infisical run "${infisical_args[@]}" --command="true" 2>&1)
         returncode=$?
-        echo "$infisical_output"
+        if [[ "$returncode" -eq 0 ]]; then
+            log_info "Infisical: secrets available."
+        else
+            log_error "Infisical could not provide the secrets (exit $returncode):"
+            tail -n 10 <<<"$infisical_output"
+            log_hint "Check INFISICAL_TOKEN and INFISICAL_PATH."
+        fi
         # Stop here whether or not notifications are on: without the secrets the
         # export cannot run. The run log does not exist yet, so the message says
         # what failed and carries Infisical's own last lines.
@@ -159,7 +192,6 @@ $(tail -n 5 <<<"$infisical_output")"
     fi
 
     if [[ -n "${FILE_LOG}" ]]; then
-        echo -e "\n${Cyan}Output log enabled: $FILE_LOG "
         logfile=$FILE_LOG
     fi
 
@@ -203,8 +235,8 @@ $(tail -n 5 <<<"$infisical_output")"
     else
         # Say so rather than degrade quietly: without this the export is killed
         # outright and leaves a logged-in CLI session for the next run to clean up.
-        echo -e "\n${Yellow}Warning: pkill (procps) not found. A container stop will not reach the export,"
-        echo -e "${Yellow}so it cannot close its Bitwarden CLI session. Install procps in the image."
+        log_warn "pkill (procps) not found. A container stop will not reach the export, so it cannot close its Bitwarden CLI session."
+        log_hint "Install procps in the image."
     fi
 
     # The subshell keeps the pipeline's status (with pipefail) addressable as one
@@ -220,7 +252,7 @@ $(tail -n 5 <<<"$infisical_output")"
         return=$?
     done
     trap - TERM INT
-    echo Return Code: $return
+    log_info "Run finished with exit code $return."
 
     if [[ "$return" -ne "0" ]]; then
         send_notification
@@ -245,12 +277,21 @@ if [[ "${1:-}" == "--run-once" ]]; then
     if [[ -n "${CRON:-}" ]]; then
         exec 9>"$LOCK_FILE"
         if ! flock -n 9; then
-            echo -e "\n${Yellow}Another export is already running; skipping this scheduled run."
+            log_warn "Another export is already running; skipping this scheduled run."
             exit 0
         fi
     fi
     run_once
 fi
+
+# The project's logo, once per container start (not on every scheduled run,
+# which re-enters this script with --run-once and never gets here).
+echo " _                                             _   ";
+echo "| |____      __      _____  ___ __   ___  _ __| |_ ";
+echo "| '_ \ \ /\ / /____ / _ \ \/ / '_ \ / _ \| '__| __|";
+echo "| |_) \ V  V /_____|  __/>  <| |_) | (_) | |  | |_ ";
+echo "|_.__/ \_/\_/       \___/_/\_\ .__/ \___/|_|   \__|";
+echo "                             |_|                   ";
 
 if [[ "$ENTRYPOINT_UID" -eq 0 ]]; then
     "$ADDUSER_BIN"
@@ -258,11 +299,10 @@ else
     # 10-adduser maps PUID/PGID onto the image's user and hands it the mounted
     # folders; both need root. Here the container's own user already decides
     # who owns the files, so the folders must simply be writable by it.
-    echo -e "\n${Cyan}Running as uid $ENTRYPOINT_UID (gid $(id -g)): user setup skipped."
-    echo -e "${Cyan}The mounted folders must be writable by this user."
+    log_info "Started as uid $ENTRYPOINT_UID (gid $(id -g)): user setup skipped. The mounted folders must be writable by this user."
     if [[ -n "${PUID:-}${PGID:-}" ]]; then
-        echo -e "${Yellow}Warning: PUID and PGID are ignored when the container does not start as root."
-        echo -e "${Yellow}The user it runs as (compose \"user:\") already decides who owns the files."
+        log_warn "PUID and PGID are ignored when the container does not start as root."
+        log_hint "The user it runs as (compose \"user:\") already decides who owns the files."
     fi
 fi
 
@@ -274,11 +314,11 @@ fi
 # backup right away, and hand PID 1 over to supercronic.
 printf '%s bash %q --run-once\n' "$CRON" "$0" > "$CRONTAB_FILE"
 if ! "$SUPERCRONIC_BIN" -test "$CRONTAB_FILE"; then
-    echo -e "\n${Yellow}ERROR: Invalid CRON expression: $CRON" >&2
+    log_error "Invalid CRON expression: $CRON" >&2
     exit 1
 fi
 
-echo -e "\n${Cyan}Cron mode enabled ($CRON). Running initial backup..."
+log_info "Cron mode enabled ($CRON). Running the initial backup..."
 bash "$0" --run-once &
 startup_pid=$!
 trap 'kill -TERM "$startup_pid" 2>/dev/null || true; wait "$startup_pid" 2>/dev/null || true; exit 143' TERM
@@ -286,5 +326,5 @@ trap 'kill -INT "$startup_pid" 2>/dev/null || true; wait "$startup_pid" 2>/dev/n
 wait "$startup_pid" || true
 trap - TERM INT
 
-echo -e "\n${Cyan}Starting cron scheduler ($CRON)..."
+log_info "Starting the cron scheduler ($CRON). Next backups run on that schedule."
 exec "$SUPERCRONIC_BIN" "$CRONTAB_FILE"

@@ -18,6 +18,11 @@
 #   A value that looks like a file in a folder that exists warns, and is used.
 #
 # Never prints the secret value itself in any warning or trace.
+
+# Log lines in the image's one format (log.sh), loaded unless the caller did.
+# shellcheck disable=SC1090
+declare -F log_warn >/dev/null || . "${LOG_LIB:-/usr/local/lib/bw-export/log.sh}"
+
 resolve_secret() {
     set +x
     local name="${1:-}"
@@ -27,7 +32,7 @@ resolve_secret() {
 
     if [[ -n "$file" ]]; then
         if [[ -n "$val" ]]; then
-            echo -e "${Yellow:-}Warning: $name and $file_name are both set; set only one." >&2
+            log_warn "$name and $file_name are both set; set only one." >&2
             return 0
         fi
         read_secret_file "$file_name" "$file"
@@ -44,7 +49,7 @@ resolve_secret() {
     # Docker mounts secrets there. Used as a literal, the path itself became
     # the password: the export was encrypted with "/run/secrets/..." instead.
     if [[ "$val" == /run/secrets/* ]]; then
-        echo -e "${Yellow:-}Warning: $name points to /run/secrets, but that secret is not mounted." >&2
+        log_warn "$name points to /run/secrets, but that secret is not mounted." >&2
         return 0
     fi
 
@@ -53,7 +58,7 @@ resolve_secret() {
     # and is not warned about on every run.
     local dir="${val%/*}"
     if [[ "$val" == /* && -n "$dir" && -d "$dir" ]]; then
-        echo -e "${Yellow:-}Warning: $name looks like a file path, but the file was not found." >&2
+        log_warn "$name looks like a file path, but the file was not found." >&2
     fi
 
     printf '%s' "$val"
@@ -64,15 +69,15 @@ resolve_secret() {
 read_secret_file() {
     local name="$1" path="$2" line="" found=""
     if [[ ! -e "$path" ]]; then
-        echo -e "${Yellow:-}Warning: $name points to a file that does not exist." >&2
+        log_warn "$name points to a file that does not exist." >&2
         return 0
     fi
     if [[ ! -f "$path" ]]; then
-        echo -e "${Yellow:-}Warning: $name points to a path that is not a regular file." >&2
+        log_warn "$name points to a path that is not a regular file." >&2
         return 0
     fi
     if [[ ! -r "$path" ]]; then
-        echo -e "${Yellow:-}Warning: $name points to a file that cannot be read." >&2
+        log_warn "$name points to a file that cannot be read." >&2
         return 0
     fi
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -83,7 +88,7 @@ read_secret_file() {
         fi
     done < "$path"
     if [[ -z "$found" ]]; then
-        echo -e "${Yellow:-}Warning: $name points to an empty file." >&2
+        log_warn "$name points to an empty file." >&2
         return 0
     fi
     printf '%s' "$found"
