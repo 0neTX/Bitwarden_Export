@@ -3,6 +3,13 @@ on:
     branches:
       - dev
 name: CD to Docker Hub for Dev branchs
+# Every job only reads the repository: images go to Docker Hub with its own
+# credentials, and the GitHub API is only asked about public releases. Without
+# this the token gets the repository's default, which is write access, and so
+# does every action the job runs.
+permissions:
+  contents: read
+
 jobs:
   docker:
     runs-on: ubuntu-latest
@@ -10,6 +17,9 @@ jobs:
       # bitwarden/clients releases cli-, desktop-, browser- and web- from the
       # same repo, and "the latest release" is usually not the CLI: the previous
       # step tagged an image :web-v2026.8.0. Ask for the newest cli- one.
+      # The Dockerfile verifies the zip against BW_CLI_SHA256, so its digest is
+      # resolved too, from the asset the Dockerfile downloads: bw-bit-linux,
+      # or bw-linux for releases before the rename.
       - id: bitwardencli
         name: Resolve latest Bitwarden CLI release
         env:
@@ -20,23 +30,34 @@ jobs:
             --jq '[.[] | select(.draft == false and .prerelease == false)
                        | select(.tag_name | startswith("cli-v"))][0].tag_name')
           if [ -z "$tag" ]; then echo "no cli- release found" >&2; exit 1; fi
-          echo "version=${tag#cli-v}" >> "$GITHUB_OUTPUT"
-          echo "Resolved $tag"
+          version=${tag#cli-v}
+          # Checked before it goes into the jq filter below (gh api --jq takes
+          # no --arg), and into a build argument.
+          if ! [[ $version =~ ^[0-9]+(\.[0-9]+)+$ ]]; then echo "unexpected CLI version: $version" >&2; exit 1; fi
+          digest=$(gh api "repos/bitwarden/clients/releases/tags/$tag" --jq \
+            "[.assets[] | select(.name == \"bw-bit-linux-$version.zip\")] + [.assets[] | select(.name == \"bw-linux-$version.zip\")] | .[0].digest // empty")
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "no sha256 digest for the CLI zip of $tag" >&2; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha256=${digest#sha256:}" >> "$GITHUB_OUTPUT"
+          echo "Resolved $tag (${digest})"
       -
         name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       -
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       -
         name: Login to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       -
         name: Build and push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           push: true
           # Actually build with the version we just resolved. Until now it was
@@ -44,4 +65,5 @@ jobs:
           # whatever the Dockerfile had pinned.
           build-args: |
             BW_CLI_VERSION=${{ steps.bitwardencli.outputs.version }}
+            BW_CLI_SHA256=${{ steps.bitwardencli.outputs.sha256 }}
           tags: 0netx/bw-export:beta, 0netx/bw-export:${{ steps.bitwardencli.outputs.version }}

@@ -179,6 +179,7 @@ Every run writes a dated folder, `<DateTime>-bw-export`, into the output path:
 - a JSON file with your **personal vault** (password-encrypted when `EXPORT_PASSWORD` is set — recommended),
 - a JSON file per **organization vault**, if you export any,
 - a folder with your **attachments**, one subfolder per vault item, or a single `attachments.tar.gz.gpg` when `ENCRYPT_ATTACHMENTS` is on.
+  Each subfolder is named after its item. Items that share a name get their short ID appended, `Passport (1a2b3c4d)`, and so do attachments that share a name within an item, `scan (9f8e7d6c).pdf`, so that none overwrites another. Names are compared ignoring case, as on Windows and macOS.
 
 The log ends with a summary of the run, which is also what the [notification](#notifications) carries:
 
@@ -231,7 +232,7 @@ Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `B
 | `NOTIFICATION_URL` | — | Shoutrrr URL for the start/success/failure messages. See [Notifications](#notifications). |
 | `NOTIFICATION_LEVEL` | `all` | `failure` sends a message only when a run fails. See [Notifications](#notifications). |
 | `PING_URL` | — | Watchdog endpoint pinged at start and on completion. See [Monitoring](#monitoring). |
-| `INFISICAL_TOKEN` | — | Infisical service token, to read the credentials from Infisical. See [Option B](#option-b-infisical). |
+| `INFISICAL_TOKEN` | — | Infisical service token, to read the credentials from Infisical. Can also be given as `INFISICAL_TOKEN_FILE`, the path of a file holding it. See [Option B](#option-b-infisical). |
 | `INFISICAL_PATH` | token's own path | *Secrets Path* of that service token. |
 | `PUID` / `PGID` | `0` (root) | Host user and group the exported files should belong to. See [PUID and PGID](#file-ownership-puid-and-pgid). |
 
@@ -570,6 +571,9 @@ docker create ... -e PUID=1000 -e PGID=1000 ...
 
 Use your own ids, which `id $user` reports as `uid` and `gid`.
 
+> [!TIP]
+> **Set them even if root-owned files do not bother you.** Without `PUID`, the export itself runs as root: the Bitwarden CLI, which handles your master password, then has root's access to everything mounted in the container. With `PUID`/`PGID` it runs as that user and can write only to the backup folders and its own data folder. For a container that stays up with `CRON`, the [hardened setup](#hardened-setup) goes further: it never starts as root at all.
+
 ### Rootless Podman
 
 Rootless Podman maps the container's uids onto your subordinate uid range, so `PUID=1000` inside the container is **not** uid 1000 on the host: exports end up owned by an unknown user, or cannot be written at all. Add the [`compose.podman.yml`](compose.podman.yml) override, which uses `keep-id` so your uid means the same inside and outside the container:
@@ -658,6 +662,10 @@ Messages from the Bitwarden CLI itself appear indented under the error they expl
 
 ## Upgrade notes
 
+### Bitwarden CLI data folder
+
+The CLI's session data now lives in `/app/data`, the only folder in `/app` the export user can write to; the rest of `/app` belongs to root. Earlier versions kept that data in `/app` itself and gave the whole folder to that user. Nothing needs changing: on start the container moves ownership back and removes the old `/app/data.json`, which held only the previous run's logged-out session. A `BITWARDENCLI_APPDATA_DIR` you set yourself is still used.
+
 ### Moving to several vaults
 
 A single-vault setup keeps working unchanged. To back up a second account, move the existing one into `BW_VAULTS` too: its `BW_CLIENTID` becomes `VAULT_<NAME>_BW_CLIENTID`, and so on.
@@ -734,6 +742,14 @@ Bug reports: [open an issue](https://github.com/0neTX/Bitwarden_Export/issues/ne
 ## Security
 
 To report a vulnerability, follow [SECURITY.md](SECURITY.md). Please do not open a public issue for one.
+
+Running it safely:
+
+- **Do not run the export as root.** Set [`PUID`/`PGID`](#file-ownership-puid-and-pgid), or use the [hardened setup](#hardened-setup), which never starts as root.
+- **Keep secrets out of the compose file.** Use the `_FILE` variables with [Docker secrets](#option-a-docker-secrets) (including `INFISICAL_TOKEN_FILE`), or [Infisical](#option-b-infisical); values in `environment:` are visible to anyone who can run `docker inspect`.
+- **Encrypt what you store.** Set `EXPORT_PASSWORD` and `ENCRYPT_ATTACHMENTS=true`, and keep that password somewhere other than Bitwarden.
+- **Restrict who can read the backups** on a shared host with `BACKUP_PERMISSIONS=private`.
+- **The log is safe to share:** it never contains secrets, server addresses or names from your vault (see [Reading the log](#reading-the-log)).
 
 ## Credits
 

@@ -9,12 +9,19 @@ on:
       - main
       - dev
 
+# Every job only reads the repository: images go to Docker Hub with its own
+# credentials, and the GitHub API is only asked about public releases. Without
+# this the token gets the repository's default, which is write access, and so
+# does every action the job runs.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: shellcheck + unit suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Pinned rather than using the runner's shellcheck: versions disagree about
       # which findings exist, so an image update would fail unrelated pull
@@ -74,15 +81,15 @@ jobs:
     name: docker build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Build only. Catches a broken Dockerfile at review time rather than when
       # a publish workflow pushes it to Docker Hub. Loaded into the daemon so
       # the labels can be read back below.
       - name: build image (no push)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: false

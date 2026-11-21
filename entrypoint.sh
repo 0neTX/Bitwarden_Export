@@ -35,6 +35,12 @@ if [[ ! -w "$APP_DIR" ]]; then
         # Private: it holds the CLI's tokens while a run is logged in.
         [[ -d "$BITWARDENCLI_APPDATA_DIR" ]] || mkdir -m 700 "$BITWARDENCLI_APPDATA_DIR" 2>/dev/null || true
     fi
+elif [[ -z "${BITWARDENCLI_APPDATA_DIR:-}" ]]; then
+    # Started as root: the CLI's state goes in the one folder of /app the export
+    # user owns (10-adduser). /app itself stays root's, because root runs code
+    # from it.
+    export BITWARDENCLI_APPDATA_DIR="$APP_DIR/data"
+    [[ -d "$BITWARDENCLI_APPDATA_DIR" ]] || mkdir -m 700 "$BITWARDENCLI_APPDATA_DIR" 2>/dev/null || true
 fi
 # A uid with no entry in /etc/passwd gets HOME=/, which it cannot write to.
 if [[ ! -w "${HOME:-/}" ]]; then
@@ -73,7 +79,7 @@ run_header() {
         if [[ "$(notify_level)" == failure ]]; then notifications="failures only"; else notifications="on"; fi
     fi
     [[ -n "$(resolve_secret PING_URL 2>/dev/null)" ]] && ping="on"
-    [[ -n "${INFISICAL_TOKEN:-}" ]] && infisical="on"
+    secret_is_set INFISICAL_TOKEN && infisical="on"
     [[ -n "${BW_VAULTS:-}" ]] && vaults="several (BW_VAULTS)"
     log_info "Vaults: $vaults; notifications: $notifications; monitoring ping: $ping; Infisical: $infisical; log file: $([[ -n "${FILE_LOG:-}" ]] && echo on || echo off)"
 }
@@ -152,7 +158,20 @@ $tail_lines"
     fi
     logfile="${LOGFILE_DEFAULT:-/app/bw-export-logfile.log}"
 
-    if [[ -n "${INFISICAL_TOKEN}" ]]; then
+    # INFISICAL_TOKEN may come as INFISICAL_TOKEN_FILE, like the other secrets,
+    # so that "docker inspect" does not show it. The infisical CLI only reads
+    # the variable, so the value is put there, in this process's environment.
+    if secret_is_set INFISICAL_TOKEN; then
+        INFISICAL_TOKEN=$(resolve_secret INFISICAL_TOKEN)
+        unset INFISICAL_TOKEN_FILE
+        if [[ -z "$INFISICAL_TOKEN" ]]; then
+            log_error "INFISICAL_TOKEN is set, but no token could be read from it."
+            exit 1
+        fi
+        export INFISICAL_TOKEN
+    fi
+
+    if [[ -n "${INFISICAL_TOKEN:-}" ]]; then
         # An array, so that no INFISICAL_PATH means no argument at all. A quoted
         # empty string reaches Infisical as an argument, which it rejects, so the
         # check below failed whenever INFISICAL_PATH was not set.
@@ -184,10 +203,13 @@ $tail_lines"
 $(tail -n 5 <<<"$infisical_output")"
             exit 1
         fi
+        # Without --log-level=error the infisical CLI adds its own "Injecting N
+        # secrets" line, with colour codes, to every run's log (since 0.45,
+        # --silent alone no longer hides it). Errors still show.
         if [[ -n "$infisicalpath" ]]; then
-            printf -v command 'infisical run %q --command=%q' "$infisicalpath" "$command"
+            printf -v command 'infisical run --silent --log-level=error %q --command=%q' "$infisicalpath" "$command"
         else
-            printf -v command 'infisical run --command=%q' "$command"
+            printf -v command 'infisical run --silent --log-level=error --command=%q' "$command"
         fi
     fi
 
@@ -312,9 +334,23 @@ fi
 
 # Cron mode: validate the schedule first so a typo fails fast, run an initial
 # backup right away, and hand PID 1 over to supercronic.
+# CRON is written into a crontab line ahead of the command, so anything after
+# the schedule would be run as part of it, as root: "* * * * * touch x #" passes
+# supercronic's own check and runs "touch x" every minute. Only a schedule is
+# let through: a macro, or 5 to 7 fields of digits, cron punctuation and the
+# three-letter month and day names. supercronic then checks the schedule.
+cron_field='([0-9*?#/,LW-]|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|SUN|MON|TUE|WED|THU|FRI|SAT)+'
+cron_pattern="^(@(YEARLY|ANNUALLY|MONTHLY|WEEKLY|DAILY|MIDNIGHT|HOURLY)|${cron_field}([ ]+${cron_field}){4,6})$"
+cron_value=${CRON^^}
+if [[ $CRON == *$'\n'* ]] || ! [[ ${cron_value//$'\t'/ } =~ $cron_pattern ]]; then
+    log_error "Invalid CRON expression: $CRON" >&2
+    log_hint "Use 5 fields such as \"0 3 * * *\", or a macro such as @daily." >&2
+    exit 1
+fi
 printf '%s bash %q --run-once\n' "$CRON" "$0" > "$CRONTAB_FILE"
 if ! "$SUPERCRONIC_BIN" -test "$CRONTAB_FILE"; then
     log_error "Invalid CRON expression: $CRON" >&2
+    log_hint "Use 5 fields such as \"0 3 * * *\", or a macro such as @daily." >&2
     exit 1
 fi
 

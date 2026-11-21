@@ -20,7 +20,19 @@ fi
 groupmod -o -g "$PGID" bitwarden
 usermod -o -u "$PUID" bitwarden
 
-chown -R  bitwarden:bitwarden /app
+# Only the CLI's data folder belongs to the export user. The rest of /app is
+# code that root runs (shoutrrr sends every notification as root), so a user
+# that could write there could become root. Earlier versions gave all of /app
+# to that user, and a container restarted rather than recreated still has it
+# that way, so it is handed back to root on every start.
+mkdir -p /app/data
+chown root:root /app
+find /app -mindepth 1 -maxdepth 1 ! -name data -exec chown -R root:root {} +
+chmod 700 /app/data
+chown -R bitwarden:bitwarden /app/data
+# The CLI kept its state in /app itself before (data.json, and vaults/ with
+# BW_VAULTS). Each run logs in afresh, so that old state is only stale tokens.
+rm -rf /app/data.json /app/vaults
 chown -R  bitwarden:bitwarden /var/data
 chown -R  bitwarden:bitwarden /var/attachments
 # Legacy mount point from the old README/compose; see bw_export.sh.

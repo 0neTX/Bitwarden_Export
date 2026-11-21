@@ -501,6 +501,16 @@ encrypt_folder() {
 # every target filesystem accepts: "/" and "\" would be read as path
 # separators, and NTFS (this image is commonly bind-mounted onto Windows
 # volumes) rejects < > : " | ? * and trailing dots or spaces outright.
+#
+# Names are not unique, paths must be. Two items with the same name would share
+# a folder, and two attachments with the same name, in one item or in two items
+# sharing a folder, would overwrite each other while both were counted as
+# saved. So every item whose folder name is taken by another gets its short ID
+# appended, "Passport (1a2b3c4d)", and so does every attachment whose name is
+# taken within its item, "scan (9f8e7d6c).pdf". Names are compared ignoring
+# case, as NTFS and macOS do. Unique names keep the plain form they always had.
+# Each attachment is asked for by its ID, not its name: by name the CLI matches
+# substrings, and two attachments with one name made both downloads fail.
 attachments_failed=0
 attachments_saved=0
 archive_failed=0
@@ -536,28 +546,57 @@ if [[ $attachments_total -gt 0 ]]; then
     # failure is logged with the item's ID and the attachment's position, which
     # is enough to find it in the vault without naming it.
     attachment_index=0
-    while IFS=$'\t' read -r item_id file_name output_dir; do
+    attachment_err=$(mktemp)
+    attachments_undecryptable=0
+    while IFS=$'\t' read -r item_id attachment_ref output_path; do
         attachment_index=$((attachment_index + 1))
         rc=0
-        bw get attachment "$file_name" --itemid "$item_id" --output "$output_dir" >/dev/null || rc=$?
+        bw get attachment "$attachment_ref" --itemid "$item_id" --output "$output_path" >/dev/null 2>"$attachment_err" || rc=$?
         if [[ $rc -ne 0 ]]; then
             attachments_failed=$((attachments_failed + 1))
             log_warn "Attachment $attachment_index of $attachments_total (item $item_id) could not be saved."
+            cli_said "$attachment_err"
+            # What a login page or an HTML error does to the CLI: it downloads
+            # something, then fails to decrypt or save it.
+            if grep -qiE 'decrypt|error occurred while saving' "$attachment_err"; then
+                attachments_undecryptable=$((attachments_undecryptable + 1))
+            fi
         else
             attachments_saved=$((attachments_saved + 1))
         fi
     done < <(jq -r --arg dir "$attachments_target" '
-        .[] | . as $item | (.attachments // [])[] | . as $attachment
-        | (($item.name // "")
-           | gsub("[/<>:\"\\\\|?*[:cntrl:]]"; "_")
-           | sub(" +$"; "") | sub("\\.+$"; "")) as $folder
+        def folder_name: (. // "")
+            | gsub("[/<>:\"\\\\|?*[:cntrl:]]"; "_")
+            | sub(" +$"; "") | sub("\\.+$"; "")
+            | if . == "" then "unnamed" else . end;
+        def base_name: (. // "") | split("/") | last // "";
+        def short_id: (. // "") | .[0:8];
+        def with_id($id): (capture("^(?<stem>.+?)(?<ext>\\.[^.]*)?$") // {stem: ., ext: ""})
+            | "\(.stem) (\($id | short_id))\(.ext // "")";
+        [ .[] | select((.attachments // []) | length > 0)
+          | . + {folder: (.name | folder_name)} ] as $items
+        | ($items | group_by(.folder | ascii_downcase) | map(select(length > 1) | .[].id)) as $shared
+        | $items[] | . as $item
+        | (if any($shared[]; . == $item.id) then ($item.folder | with_id($item.id)) else $item.folder end) as $folder
+        | ($item.attachments | map(.fileName | base_name | ascii_downcase)) as $names
+        | $item.attachments[] | . as $attachment
+        | ($attachment.fileName | base_name) as $name
         | [ $item.id,
-            $attachment.fileName,
-            $dir + (if $folder == "" then "unnamed" else $folder end) + "/" ]
+            ($attachment.id // $attachment.fileName),
+            (if ([$names[] | select(. == ($name | ascii_downcase))] | length) > 1
+             then $dir + $folder + "/" + ($name | with_id($attachment.id))
+             else $dir + $folder + "/" end) ]
         | @tsv' <<<"$items_json")
+    rm -f "$attachment_err"
     if [[ $attachments_failed -gt 0 ]]; then
         log_error "$attachments_failed attachment(s) could not be saved."
-        log_hint "A reverse proxy that intercepts /attachments/ is a common cause: the CLI is handed a login page and cannot decrypt it. Check that path is reachable."
+        # Only when the CLI said it could not decrypt or save what it got: for
+        # any other failure this hint pointed the wrong way.
+        if [[ $attachments_undecryptable -gt 0 ]]; then
+            log_hint "The CLI could not decrypt or save what it downloaded. A reverse proxy that intercepts /attachments/ and answers with a login page is a common cause: check that path is reachable."
+        else
+            log_hint "The Bitwarden CLI's own message is under each warning above."
+        fi
     fi
     log_info "Attachments: $attachments_saved saved, $attachments_failed failed."
     # What was saved is encrypted even when some downloads failed: a partial

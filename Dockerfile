@@ -110,7 +110,14 @@ RUN echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" | sha256sum -c - &&
 # the open-source-only build and is not used. Try the new name, then the old one,
 # so older pinned versions still build. curl -f fails on a 404 instead of saving
 # the error page as the zip.
+#
+# The zip is checked against BW_CLI_SHA256 before it is unpacked, as shoutrrr
+# and supercronic are: the CLI is what handles the master password. The value
+# is GitHub's own digest of the release asset (its "digest" field), and must
+# change together with BW_CLI_VERSION; a build of another version passes both,
+# as the dev CD does.
 ARG BW_CLI_VERSION="2026.11.0"
+ARG BW_CLI_SHA256="bfc7643cbc20f970bf04b994f96489703fcf77217a2384f1743e43848363b0ba"
 ENV BW_CLI_VERSION="${BW_CLI_VERSION}"
 
 # Copy script
@@ -125,6 +132,8 @@ COPY root/ /
 RUN base="https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_VERSION}" && \
     (curl -fsSL "${base}/bw-bit-linux-${BW_CLI_VERSION}.zip" -o /tmp/bw.zip || \
      curl -fsSL "${base}/bw-linux-${BW_CLI_VERSION}.zip" -o /tmp/bw.zip) && \
+    { echo "${BW_CLI_SHA256}  /tmp/bw.zip" | sha256sum -c - || \
+      { echo "Bitwarden CLI ${BW_CLI_VERSION}: checksum mismatch. Pass the BW_CLI_SHA256 that matches BW_CLI_VERSION." >&2; exit 1; }; } && \
     unzip /tmp/bw.zip && \
     rm -f /tmp/bw.zip && \
     chmod +x /app/bw && \
@@ -140,7 +149,10 @@ RUN base="https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_V
     mkdir -p /var/data && \
     mkdir -p /var/attachments && \
     chown -R bitwarden:bitwarden /home/bitwarden && \
-    chown -R bitwarden:bitwarden /app && \
+    # /app holds code root runs (shoutrrr for every notification): it stays
+    # root's. The export user gets only the CLI's data folder.
+    mkdir -m 700 /app/data && \
+    chown bitwarden:bitwarden /app/data && \
     chown -R bitwarden:bitwarden /var/data && \
     chown -R bitwarden:bitwarden /var/attachments && \
     mkdir -p \

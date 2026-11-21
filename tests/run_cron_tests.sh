@@ -94,6 +94,7 @@ cat > "$SBX/infisical" <<'STUB'
 #!/usr/bin/env bash
 d="${CRON_TEST_DIR:?}"
 echo "infisical:$*" >> "$d/calls"
+echo "infisical-token:${INFISICAL_TOKEN:-<none>}" >> "$d/calls"
 [ -n "${INFISICAL_STUB_FAIL:-}" ] && { echo "error: could not fetch secrets" >&2; exit 1; }
 for a in "$@"; do
   case "$a" in
@@ -174,6 +175,24 @@ eq "exit 1"                "1" "$rc"
 eq "no backup attempted"   "0" "$(grep -c '^bw_export:' "$SBX/calls")"
 eq "error message printed" "1" "$(grep -c 'ERROR: Invalid CRON expression' "$SBX/stdout")"
 
+echo "=== C4b: a CRON value carrying a command is refused before any crontab is written ==="
+# The stub supercronic accepts everything, as the real one does with a command
+# after five valid fields: only the entrypoint's own check stands in the way.
+for bad in "* * * * * touch $SBX/pwned #" "@daily touch $SBX/pwned" "0 3 * * *
+* * * * * touch $SBX/pwned"; do
+  reset
+  rc=$(CRON="$bad" run_entry)
+  eq "[$(printf %q "${bad%% *}")...] exit 1"           "1" "$rc"
+  eq "[$(printf %q "${bad%% *}")...] says why"         "1" "$(grep -c 'ERROR: Invalid CRON expression' "$SBX/stdout")"
+  eq "[$(printf %q "${bad%% *}")...] no crontab"       "0" "$(test -e "$SBX/crontab" && echo 1 || echo 0)"
+  eq "[$(printf %q "${bad%% *}")...] nothing ran"      "0" "$(grep -c '^bw_export:' "$SBX/calls"; test -e "$SBX/pwned" && echo pwned)"
+done
+for good in "0 3 * * mon-fri" "@daily" "0 30 3 * * *"; do
+  reset
+  rc=$(CRON="$good" BW_EXPORT_TAG=startup run_entry)
+  eq "[$good] accepted: supercronic started" "1" "$(grep -c "^supercronic $SBX/crontab$" "$SBX/calls")"
+done
+
 echo "=== C5: startup backup failing in CRON mode still starts supercronic ==="
 reset
 rc=$(CRON="0 3 * * *" BW_EXPORT_RC=1 BW_EXPORT_TAG=startup run_entry)
@@ -252,7 +271,7 @@ rc=$(unset CRON; APP_DIR_TEST="$SBX/no-such-dir" TMPDIR="$SBX/tmp" BITWARDENCLI_
 eq "a BITWARDENCLI_APPDATA_DIR given is kept" "1" "$(grep -c '^env:APPDATA=/custom/state ' "$SBX/calls")"
 reset
 rc=$(unset CRON BITWARDENCLI_APPDATA_DIR; run_entry)
-eq "writable image folder: nothing moved" "1" "$(grep -c '^env:APPDATA=<unset> ' "$SBX/calls")"
+eq "writable image folder: CLI state in its data folder" "1" "$(grep -c "^env:APPDATA=$SBX/data " "$SBX/calls")"
 reset
 rc=$(unset CRON; HOME="$SBX/no-such-home" TMPDIR="$SBX/tmp" run_entry)
 eq "an unwritable HOME becomes TMPDIR" "1" "$(grep -c "HOME=$SBX/tmp$" "$SBX/calls")"
@@ -335,6 +354,20 @@ eq "ping 0 sent once"          "1" "$(grep -c '^ping:https://hc.example/0$' "$SB
 eq "ping 1 sent once"          "1" "$(grep -c '^ping:https://hc.example/1$' "$SBX/calls")"
 eq "notify has current error"  "1" "$(grep -c 'current-run-error-only' "$SBX/last_notify")"
 eq "notify omits startup line" "0" "$(grep -c 'log-line:startup' "$SBX/last_notify")"
+
+echo "=== C11b: INFISICAL_TOKEN_FILE gives the token to infisical, and a missing file stops ==="
+reset
+printf 'st.token-from-file\n' > "$SBX/inf-token"
+rc=$(unset CRON INFISICAL_TOKEN; INFISICAL_TOKEN_FILE="$SBX/inf-token" run_entry)
+eq "exit 0"                          "0" "$rc"
+eq "infisical ran"                   "1" "$([ "$(grep -c '^infisical:' "$SBX/calls")" -ge 1 ] && echo 1 || echo 0)"
+eq "infisical got the file's token"  "1" "$([ "$(grep -c '^infisical-token:st.token-from-file$' "$SBX/calls")" -ge 1 ] && echo 1 || echo 0)"
+eq "the token never in the log"     "0" "$(grep -c 'token-from-file' "$SBX/stdout")"
+reset
+rc=$(unset CRON INFISICAL_TOKEN; INFISICAL_TOKEN_FILE="$SBX/no-such-token" run_entry)
+eq "missing file: exit 1"           "1" "$rc"
+eq "missing file: says why"         "1" "$(grep -c 'ERROR: INFISICAL_TOKEN is set, but no token could be read from it' "$SBX/stdout")"
+eq "missing file: no export"        "0" "$(grep -c '^bw_export:' "$SBX/calls")"
 
 echo "=== C12: INFISICAL_TOKEN works in both startup and scheduled CRON runs ==="
 reset
