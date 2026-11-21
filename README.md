@@ -198,7 +198,9 @@ The Bitwarden CLI cannot export items in your **Trash** or your **password histo
 
 ## Configuration
 
-Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`, `EXPORT_PASSWORD`, `NOTIFICATION_URL`, `PING_URL`) can be given instead as `NAME_FILE`, the path of a file holding it. See [Option A: Docker secrets](#option-a-docker-secrets).
+Everything is set through environment variables. Only the three credentials are required; every other variable has a default that works, and the tables below give it.
+
+Any variable that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`, `EXPORT_PASSWORD`, `NOTIFICATION_URL`, `PING_URL`, `INFISICAL_TOKEN`) can be given instead as `NAME_FILE`, the path of a file holding it, so that `docker inspect` does not show it. Set only one of the two: for the credentials, both set stops the run. See [Option A: Docker secrets](#option-a-docker-secrets).
 
 ### Required
 
@@ -208,33 +210,76 @@ Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `B
 | `BW_CLIENTSECRET` | The `client_secret` of that API key. |
 | `BW_PASSWORD` | Your Bitwarden/Vaultwarden master password. |
 
+With [several vaults](#several-vaults), these go in each vault's own variables (`VAULT_<NAME>_BW_CLIENTID`, …) instead.
+
 ### Recommended
 
 | Variable | Description |
 |---|---|
 | `EXPORT_PASSWORD` | Encrypts the export files. Use a strong password you can remember, and **do not store it only inside Bitwarden**: if you get locked out of your account you could not decrypt your own backups. Left unset, the exports are written in plain text. |
+| `PUID` / `PGID` | The host user and group the export runs as and the files belong to. Without them the export runs as root. See [PUID and PGID](#file-ownership-puid-and-pgid). |
 
 ### Optional
+
+#### Server and what is exported
 
 | Variable | Default | Description |
 |---|---|---|
 | `BW_URL_SERVER` | bitwarden.com | URL of your self-hosted Vaultwarden/Bitwarden server. Must be HTTPS. |
 | `BW_ORGANIZATIONS_LIST` | every organization you own or administer | Comma-separated organization IDs to export, or `none` to export no organization. |
+| `BW_VAULTS` | — (one vault) | Comma-separated names of several vaults to export in one run, each configured with `VAULT_<NAME>_…` variables. See [Several vaults](#several-vaults). |
+
+#### Where backups go and how long they are kept
+
+| Variable | Default | Description |
+|---|---|---|
 | `OUTPUT_PATH` | `/var/data/` | Where the vault exports are written. The path must exist in the container, normally as a mounted volume. |
 | `ATTACHMENTS_PATH` | `/var/attachments/` | Where the attachments are written, same condition. |
 | `KEEP_LAST_BACKUPS` | keep everything | Keep only the N newest export folders, delete the rest. See [Retention](#retention). |
 | `KEEP_GFS` | — | Keep the newest export of each recent day, week, month and year, e.g. `7d:4w:6m`. Can be combined with `KEEP_LAST_BACKUPS`. See [Retention](#retention). |
-| `BACKUP_PERMISSIONS` | `default` | `private` makes each run's folders `700` and its files `600`, so only their owner can read them. See [Permissions of the backups](#permissions-of-the-backups). |
+
+#### Encryption and permissions
+
+| Variable | Default | Description |
+|---|---|---|
 | `ENCRYPT_ATTACHMENTS` | `false` | `true` packs the attachments into one archive encrypted with `EXPORT_PASSWORD`, which must then be set. See [Encrypted attachments](#encrypted-attachments). |
-| `FILE_LOG` | container-only log | Path of the run log, e.g. `/var/data/bw-export-logfile.log`. Point it inside a mounted volume or it is lost with the container. When `CRON` is enabled, appends across runs and rotates to `<FILE_LOG>.1` at 100 MiB. |
-| `CRON` | — (one-shot) | Standard 5-field cron expression (e.g. `0 3 * * *`) or macro (`@daily`, `@hourly`, etc., powered by `supercronic`). Validates the expression on startup (exiting `1` if invalid), runs an initial backup immediately, and keeps running for scheduled backups (skipping overlapping runs; if the initial backup fails, the scheduler keeps running). Recommended: set `restart: unless-stopped`. |
-| `TZ` | `UTC` | Timezone for logs and `CRON` schedules (e.g. `Europe/Madrid`, `America/New_York`). |
-| `NOTIFICATION_URL` | — | Shoutrrr URL for the start/success/failure messages. See [Notifications](#notifications). |
-| `NOTIFICATION_LEVEL` | `all` | `failure` sends a message only when a run fails. See [Notifications](#notifications). |
-| `PING_URL` | — | Watchdog endpoint pinged at start and on completion. See [Monitoring](#monitoring). |
-| `INFISICAL_TOKEN` | — | Infisical service token, to read the credentials from Infisical. Can also be given as `INFISICAL_TOKEN_FILE`, the path of a file holding it. See [Option B](#option-b-infisical). |
-| `INFISICAL_PATH` | token's own path | *Secrets Path* of that service token. |
-| `PUID` / `PGID` | `0` (root) | Host user and group the exported files should belong to. See [PUID and PGID](#file-ownership-puid-and-pgid). |
+| `BACKUP_PERMISSIONS` | `default` | `private` makes each run's folders `700` and its files `600`, so only their owner can read them. See [Permissions of the backups](#permissions-of-the-backups). |
+
+#### Schedule and log
+
+| Variable | Default | Description |
+|---|---|---|
+| `CRON` | — (one backup, then exit) | When to back up: a standard 5-field expression such as `0 3 * * *` (supercronic's extended 6- and 7-field forms work too) or a macro: `@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly`, `@annually`. Anything else stops the container at start. The container then stays up, backs up once at start and at every scheduled time, and skips a run while the previous one is still going. Set `restart: unless-stopped`. See [Scheduling](#scheduling). |
+| `TZ` | `UTC` | Timezone for the log and for `CRON`, e.g. `Europe/Madrid`. |
+| `FILE_LOG` | inside the container only | Path of a log file, e.g. `/var/data/bw-export-logfile.log`. Put it in a mounted volume or it is lost with the container. Each run overwrites it; with `CRON`, runs are appended instead and the file is rotated to `<FILE_LOG>.1` once it reaches `FILE_LOG_MAX_BYTES`. |
+| `FILE_LOG_MAX_BYTES` | `104857600` (100 MiB) | Size at which the `CRON` log is rotated. |
+
+#### Notifications and monitoring
+
+| Variable | Default | Description |
+|---|---|---|
+| `NOTIFICATION_URL` | — | [Shoutrrr](https://shoutrrr.nickfedor.com/latest/services/overview/) URL for the start, success and failure messages. See [Notifications](#notifications). |
+| `NOTIFICATION_LEVEL` | `all` | `failure` sends a message only when a run fails. |
+| `PING_URL` | — | Watchdog endpoint (healthchecks, uptime-kuma, …) pinged at start and on completion. See [Monitoring](#monitoring). |
+
+#### Secrets from Infisical
+
+| Variable | Default | Description |
+|---|---|---|
+| `INFISICAL_TOKEN` | — | Infisical service token: the credentials and `EXPORT_PASSWORD` are then read from Infisical. See [Option B](#option-b-infisical). |
+| `INFISICAL_PATH` | the token's own path | *Secrets Path* to read. A service token always applies its own scope, so this rarely needs setting. |
+
+#### Advanced
+
+Rarely needed; the defaults suit almost every setup.
+
+| Variable | Default | Description |
+|---|---|---|
+| `NODE_EXTRA_CA_CERTS` | — | Path of a PEM file with an extra certificate authority to trust, for a self-hosted server whose certificate is signed by your own CA. Mount the file and point this at it, e.g. `/certs/ca.crt`. |
+| `BITWARDENCLI_APPDATA_DIR` | `/app/data`, or `$TMPDIR/bitwarden-cli` without root | Where the Bitwarden CLI keeps its session while a run is logged in. With `BW_VAULTS`, each vault uses `<this>/vaults/<name>`. |
+| `TMPDIR` | `/tmp` | Temporary folder. Without root it also holds the CLI's session and the default log, and with `ENCRYPT_ATTACHMENTS` one run's attachments before they are encrypted, so it must fit them. |
+
+Other variables you may find in the scripts (`ADDUSER_BIN`, `APP_DIR`, `LOG_LIB` and the other `*_LIB`, `SHOUTRRR_BIN`, …) exist so the [test suites](tests/README.md) can run the scripts outside the image. They are not settings and may change without notice.
 
 ### Volumes
 
@@ -732,6 +777,20 @@ SCRIPT=$PWD/bw_export.sh bash tests/run_tests.sh
 ```
 
 See [`tests/README.md`](tests/README.md) for the rest of the suite, including the end-to-end tests.
+
+### Build arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `IMAGE_VERSION` | the release | The version the image reports (label and log). |
+| `BW_CLI_VERSION` | the tested CLI | Bitwarden CLI release to install. |
+| `BW_CLI_SHA256` | its digest | SHA-256 of that release's zip, checked before it is installed. Change it together with `BW_CLI_VERSION`; [CONTRIBUTING](CONTRIBUTING.md) shows how to get it. |
+| `SHOUTRRR_VERSION` / `SHOUTRRR_SHA256` | pinned | shoutrrr release and its checksum. |
+| `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` | pinned | supercronic release and its checksum. |
+
+```bash
+docker build --build-arg BW_CLI_VERSION=<version> --build-arg BW_CLI_SHA256=<sha256> -t bw-export .
+```
 
 ## Contributing
 
