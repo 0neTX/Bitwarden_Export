@@ -658,6 +658,10 @@ Messages from the Bitwarden CLI itself appear indented under the error they expl
 
 ## Upgrade notes
 
+### Bitwarden CLI data folder
+
+The CLI's session data now lives in `/app/data`, the only folder in `/app` the export user can write to; the rest of `/app` belongs to root. Earlier versions kept that data in `/app` itself and gave the whole folder to that user. Nothing needs changing: on start the container moves ownership back and removes the old `/app/data.json`, which held only the previous run's logged-out session. A `BITWARDENCLI_APPDATA_DIR` you set yourself is still used.
+
 ### Moving to several vaults
 
 A single-vault setup keeps working unchanged. To back up a second account, move the existing one into `BW_VAULTS` too: its `BW_CLIENTID` becomes `VAULT_<NAME>_BW_CLIENTID`, and so on.

@@ -140,7 +140,10 @@ RUN base="https://github.com/bitwarden/clients/releases/download/cli-v${BW_CLI_V
     mkdir -p /var/data && \
     mkdir -p /var/attachments && \
     chown -R bitwarden:bitwarden /home/bitwarden && \
-    chown -R bitwarden:bitwarden /app && \
+    # /app holds code root runs (shoutrrr for every notification): it stays
+    # root's. The export user gets only the CLI's data folder.
+    mkdir -m 700 /app/data && \
+    chown bitwarden:bitwarden /app/data && \
     chown -R bitwarden:bitwarden /var/data && \
     chown -R bitwarden:bitwarden /var/attachments && \
     mkdir -p \
