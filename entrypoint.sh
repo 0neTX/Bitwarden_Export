@@ -35,6 +35,12 @@ if [[ ! -w "$APP_DIR" ]]; then
         # Private: it holds the CLI's tokens while a run is logged in.
         [[ -d "$BITWARDENCLI_APPDATA_DIR" ]] || mkdir -m 700 "$BITWARDENCLI_APPDATA_DIR" 2>/dev/null || true
     fi
+elif [[ -z "${BITWARDENCLI_APPDATA_DIR:-}" ]]; then
+    # Started as root: the CLI's state goes in the one folder of /app the export
+    # user owns (10-adduser). /app itself stays root's, because root runs code
+    # from it.
+    export BITWARDENCLI_APPDATA_DIR="$APP_DIR/data"
+    [[ -d "$BITWARDENCLI_APPDATA_DIR" ]] || mkdir -m 700 "$BITWARDENCLI_APPDATA_DIR" 2>/dev/null || true
 fi
 # A uid with no entry in /etc/passwd gets HOME=/, which it cannot write to.
 if [[ ! -w "${HOME:-/}" ]]; then

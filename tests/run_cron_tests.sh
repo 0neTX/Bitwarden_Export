@@ -252,7 +252,7 @@ rc=$(unset CRON; APP_DIR_TEST="$SBX/no-such-dir" TMPDIR="$SBX/tmp" BITWARDENCLI_
 eq "a BITWARDENCLI_APPDATA_DIR given is kept" "1" "$(grep -c '^env:APPDATA=/custom/state ' "$SBX/calls")"
 reset
 rc=$(unset CRON BITWARDENCLI_APPDATA_DIR; run_entry)
-eq "writable image folder: nothing moved" "1" "$(grep -c '^env:APPDATA=<unset> ' "$SBX/calls")"
+eq "writable image folder: CLI state in its data folder" "1" "$(grep -c "^env:APPDATA=$SBX/data " "$SBX/calls")"
 reset
 rc=$(unset CRON; HOME="$SBX/no-such-home" TMPDIR="$SBX/tmp" run_entry)
 eq "an unwritable HOME becomes TMPDIR" "1" "$(grep -c "HOME=$SBX/tmp$" "$SBX/calls")"
