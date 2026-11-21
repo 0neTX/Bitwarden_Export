@@ -41,6 +41,7 @@ services:
       # - NOTIFICATION_URL=telegram://<token>@telegram?chats=<chat id>
       # - NOTIFICATION_LEVEL=failure   # only a failed run notifies; default: all
       # - PING_URL=https://hc-ping.com/<your-uuid>
-      # File ownership on the host (under rootless Podman, see compose.podman.yml).
+      # File ownership on the host, and the user the export runs as: recommended,
+      # so that it does not run as root (under rootless Podman, see compose.podman.yml).
       # - PUID=1000
       # - PGID=1000
