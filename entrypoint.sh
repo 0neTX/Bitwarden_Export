@@ -73,13 +73,14 @@ run_once() {
 
     # The run summary bw_export.sh prints between two marker lines (duration,
     # what was exported, size), without the markers. Empty when the run ended
-    # before printing one, such as a failed login.
+    # before printing one, such as a failed login. Only the last block counts: a
+    # single vault prints one, and with BW_VAULTS each vault prints its own and
+    # the run ends with one covering all of them.
     run_summary () {
-        sed -n '/^----- Summary -----$/,/^-------------------$/{
-            /^----- Summary -----$/d
-            /^-------------------$/d
-            p
-        }' "$run_log" 2>/dev/null
+        awk '/^----- Summary -----$/ { block = ""; inside = 1; next }
+             /^-------------------$/ && inside { inside = 0; last = block; next }
+             inside { block = block $0 "\n" }
+             END { printf "%s", last }' "$run_log" 2>/dev/null
     }
 
     # The failure notification: the summary, if the run got that far, then the

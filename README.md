@@ -27,6 +27,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 - [Examples](#examples)
 - [What it produces](#what-it-produces)
 - [Configuration](#configuration)
+- [Several vaults](#several-vaults)
 - [Handling secrets](#handling-secrets)
 - [Notifications](#notifications)
 - [Monitoring](#monitoring)
@@ -52,6 +53,7 @@ Your vault holds every password you have. Bitwarden_Export keeps an encrypted co
 
 - Exports your **personal vault** to JSON, plain or password-encrypted.
 - Exports your **organization vaults** (every one you own or administer, or the ones you list).
+- Exports **several accounts in one container**, even on different servers, each into a folder of its own ([details](#several-vaults)).
 - Downloads **file attachments**, one subfolder per vault item, or packs them into **one encrypted archive** with `ENCRYPT_ATTACHMENTS` ([details](#encrypted-attachments)).
 - Keeps **passwords off the command line**, so other users on the host cannot read them with `ps` ([details](#passwords-stay-off-the-command-line)).
 - Reads its credentials from **Docker secrets** or from **[Infisical](#option-b-infisical)** instead of the compose file.
@@ -162,6 +164,7 @@ Each example is a complete compose file. They go from the simplest to the most c
 | [`docker-compose.yml`](docker-compose.yml) | One backup, then exit. Lists every option, commented out. | `docker compose up` |
 | [`docker-compose.cron.sample.yml`](docker-compose.cron.sample.yml) | Backups on a schedule, with retention. See [Scheduling](#scheduling). | `docker compose -f docker-compose.cron.sample.yml up -d` |
 | [`docker-compose.secrets.sample.yml`](docker-compose.secrets.sample.yml) | Credentials as Docker secrets. See [Option A](#option-a-docker-secrets). | `docker compose -f docker-compose.secrets.sample.yml up` |
+| [`docker-compose.multi.sample.yml`](docker-compose.multi.sample.yml) | Several accounts, on bitwarden.com or self-hosted servers, each into a subfolder. See [Several vaults](#several-vaults). | `docker compose -f docker-compose.multi.sample.yml up` |
 | [`docker-compose.infisical.sample.yml`](docker-compose.infisical.sample.yml) | Credentials from Infisical. See [Option B](#option-b-infisical). | `docker compose -f docker-compose.infisical.sample.yml up` |
 | [`docker-compose.hardened.sample.yml`](docker-compose.hardened.sample.yml) | Schedule and secrets, without root, capabilities or a writable image. See [Hardened setup](#hardened-setup). | `docker compose -f docker-compose.hardened.sample.yml up -d` |
 | [`docker-compose.offsite.sample.yml`](docker-compose.offsite.sample.yml) | A second copy off the host with an rclone sidecar. See [Off-site copy](#off-site-copy-3-2-1). | `docker compose -f docker-compose.offsite.sample.yml up -d` |
@@ -238,6 +241,49 @@ Every variable below that carries a secret (`BW_CLIENTID`, `BW_CLIENTSECRET`, `B
 |---|---|
 | `/var/data` | Vault exports. |
 | `/var/attachments` | Attachments. |
+
+## Several vaults
+
+One container can back up several accounts, on bitwarden.com or on different self-hosted servers. List them in `BW_VAULTS` and give each one its settings with its name in capitals after `VAULT_`:
+
+```yaml
+environment:
+  - BW_VAULTS=personal,work
+  - VAULT_PERSONAL_BW_CLIENTID=<client id>
+  - VAULT_PERSONAL_BW_CLIENTSECRET=<client secret>
+  - VAULT_PERSONAL_BW_PASSWORD=<master password>
+  - VAULT_WORK_BW_URL_SERVER=https://vault.example.com
+  - VAULT_WORK_BW_CLIENTID=<client id>
+  - VAULT_WORK_BW_CLIENTSECRET=<client secret>
+  - VAULT_WORK_BW_PASSWORD_FILE=/run/secrets/work_password
+  - EXPORT_PASSWORD=<export password>     # for every vault without its own
+```
+
+See [`docker-compose.multi.sample.yml`](docker-compose.multi.sample.yml).
+
+- **Names** may use letters, digits and `_`, because they become part of variable names. Each vault writes into a subfolder named after it in lower case: `/var/data/personal/<DateTime>-bw-export` and `/var/attachments/personal/…`.
+- **Credentials and server belong to each vault and are never shared:** `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` (or their `_FILE` forms) and `BW_URL_SERVER`. Without a server, a vault uses bitwarden.com.
+- **These options apply to every vault unless a vault sets its own:** `EXPORT_PASSWORD` (or `EXPORT_PASSWORD_FILE`), `BW_ORGANIZATIONS_LIST`, `ENCRYPT_ATTACHMENTS`, `BACKUP_PERMISSIONS`, `KEEP_LAST_BACKUPS` and `KEEP_GFS`. An empty value turns an option off for that vault, e.g. `VAULT_WORK_KEEP_GFS=`.
+- **Everything else is shared by the whole run:** `CRON`, `TZ`, `FILE_LOG`, the notification, `PING_URL`, `PUID`/`PGID` and Infisical.
+- **One mode or the other.** With `BW_VAULTS`, setting `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD` or `BW_URL_SERVER` without a prefix is an error and nothing is exported. A `VAULT_` variable that matches no vault, such as a typo, is reported as a warning.
+- **The vaults are exported one after another**, each with its own CLI session. A vault that fails does not stop the others, and the run then exits `1`.
+- **One notification and one ping** cover the whole run. The summary has a line per vault with its duration and size, and leaves out counts that are 0:
+
+  ```text
+  Vaults: 1 of 2 failed, 1 exported, in 19s
+
+  ✅ personal (7s, 772KiB)
+     Personal vault: exported (encrypted)
+     Organizations: 1 exported
+     Attachments: none
+
+  ❌ work (failed with exit 1, 12s, 0B)
+     Personal vault: FAILED
+     Organizations: 2 failed
+     Attachments: none
+  ```
+
+Without `BW_VAULTS` nothing changes: the single vault is configured as before and writes straight into `/var/data`.
 
 ## Handling secrets
 
@@ -588,6 +634,17 @@ What changes when the container does not start as root:
 | No notification arrives | A failed notification is logged without the address and does not change the exit code. Check the log and the Shoutrrr URL. |
 
 ## Upgrade notes
+
+### Moving to several vaults
+
+A single-vault setup keeps working unchanged. To back up a second account, move the existing one into `BW_VAULTS` too: its `BW_CLIENTID` becomes `VAULT_<NAME>_BW_CLIENTID`, and so on.
+
+From then on its new backups go to `/var/data/<name>/`. The ones already at the top of `/var/data` stay where they are and are no longer rotated by `KEEP_LAST_BACKUPS` or `KEEP_GFS`, which now look inside each vault's folder. Nothing is lost; to keep them under rotation, move them into the vault's folder once, with the container stopped:
+
+```bash
+mkdir -p export/data/personal && mv export/data/*-bw-export export/data/personal/
+mkdir -p export/attachments/personal && mv export/attachments/*-bw-export export/attachments/personal/
+```
 
 ### Organizations you do not own or administer
 

@@ -30,6 +30,14 @@ UCyan='\033[4;36m'   # Cyan
 UWhite='\033[4;37m'  # White
 Blue='\033[0;34m'    # Blue
 
+# Several vaults (BW_VAULTS): vaults.sh runs this script once per vault, with
+# BW_VAULTS removed, so each of those runs is an ordinary single-vault export.
+# Checked here rather than in the entrypoint because Infisical may be what
+# provides BW_VAULTS, and it only does so when this script starts.
+if [[ -n "${BW_VAULTS:-}" ]]; then
+    exec bash "${VAULTS_LIB:-/usr/local/lib/bw-export/vaults.sh}" "$0"
+fi
+
 # Overridable like entrypoint.sh's PING_LIB and NOTIFY_LIB, so the tests can
 # point it at the repository. Without it no credential can be read at all.
 SECRETS_LIB="${SECRETS_LIB:-/usr/local/lib/bw-export/secrets.sh}"

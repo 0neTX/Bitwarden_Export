@@ -27,6 +27,7 @@ jobs:
             root/usr/local/lib/bw-export/notify.sh \
             root/usr/local/lib/bw-export/secrets.sh \
             root/usr/local/lib/bw-export/retention.sh \
+            root/usr/local/lib/bw-export/vaults.sh tests/run_vaults_tests.sh \
             tests/mock/bw tests/run_tests.sh tests/run_ping_tests.sh \
             tests/run_notify_tests.sh tests/run_cron_tests.sh \
             tests/run_secrets_tests.sh tests/run_retention_tests.sh \
@@ -61,6 +62,12 @@ jobs:
       # retention.sh directly with folder names.
       - name: retention suite
         run: bash tests/run_retention_tests.sh
+
+      # Several vaults in one run (BW_VAULTS), driven through bw_export.sh and
+      # the same mock: folders, keys, servers and sessions per vault, a failing
+      # vault, inheritance, and that no vault sees another's variables.
+      - name: vaults suite
+        run: SCRIPT="$PWD/bw_export.sh" bash tests/run_vaults_tests.sh
 
   build:
     name: docker build

@@ -52,4 +52,5 @@ docker-compose.*.yml
 # e2e test runtime data (vaultwarden db, exports, throwaway secrets)
 tests/e2e/
 tests/sbx/
+tests/sbx-vaults/
 __pycache__/
